@@ -1,5 +1,6 @@
 (function () {
   const status = document.getElementById("status");
+  const startRecording = document.getElementById("startRecording");
   const toggleOverlay = document.getElementById("toggleOverlay");
   const stopRecording = document.getElementById("stopRecording");
   const resetOverlay = document.getElementById("resetOverlay");
@@ -47,9 +48,10 @@
 
   async function sendToActiveTab(message) {
     const tab = await getActiveTab();
+    let response;
 
     try {
-      return await chrome.tabs.sendMessage(tab.id, message);
+      response = await chrome.tabs.sendMessage(tab.id, message);
     } catch (error) {
       if (!isMissingReceiver(error)) {
         throw error;
@@ -57,7 +59,7 @@
 
       try {
         await injectContentScript(tab);
-        return await chrome.tabs.sendMessage(tab.id, message);
+        response = await chrome.tabs.sendMessage(tab.id, message);
       } catch (injectError) {
         if (/^file:\/\//.test(tab.url || "")) {
           throw new Error("请在扩展详情里开启“允许访问文件网址”，然后刷新 HTML 页面。");
@@ -68,6 +70,12 @@
         throw injectError;
       }
     }
+
+    if (response?.ok === false) {
+      throw new Error(response.error || "操作失败。");
+    }
+
+    return response;
   }
 
   function setStatus(text) {
@@ -80,6 +88,15 @@
       setStatus("已切换浮窗。");
     } catch (error) {
       setStatus(error.message || "当前页面无法注入扩展。");
+    }
+  });
+
+  startRecording.addEventListener("click", async () => {
+    try {
+      await sendToActiveTab({ type: "HCR_START_RECORDING" });
+      setStatus("已开始录制当前页。");
+    } catch (error) {
+      setStatus(error.message || "当前页面无法开始录制。");
     }
   });
 

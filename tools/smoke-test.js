@@ -76,6 +76,14 @@ async function testRecordingFlow(url) {
       value: {
         runtime: {
           getURL: (resource) => `/${resource}`,
+          lastError: null,
+          sendMessage: (message, callback) => {
+            if (message?.type === "HCR_GET_TAB_STREAM_ID") {
+              callback({ ok: true, streamId: "fake-tab-stream-id" });
+              return;
+            }
+            callback({ ok: false, error: "Unknown message" });
+          },
           onMessage: { addListener: () => undefined }
         },
         storage: {
@@ -87,7 +95,7 @@ async function testRecordingFlow(url) {
       }
     });
 
-    function makeVideoStream() {
+    function makeMediaStream() {
       const canvas = document.createElement("canvas");
       canvas.width = 320;
       canvas.height = 180;
@@ -101,14 +109,28 @@ async function testRecordingFlow(url) {
         context2d.font = "24px sans-serif";
         context2d.fillText(`frame ${frame}`, 24, 96);
       }, 50);
-      return canvas.captureStream(30);
+      const stream = canvas.captureStream(30);
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const destination = audioContext.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.start();
+      destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+      return stream;
     }
 
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
-        getUserMedia: () => Promise.resolve(makeVideoStream()),
-        getDisplayMedia: () => Promise.resolve(makeVideoStream())
+        getUserMedia: (constraints) => {
+          if (constraints?.video?.mandatory?.chromeMediaSource === "tab") {
+            window.__hcrRequestedTabCapture = constraints.video.mandatory.chromeMediaSourceId;
+          }
+          return Promise.resolve(makeMediaStream());
+        },
+        getDisplayMedia: () => {
+          throw new Error("getDisplayMedia should not be used for current-tab recording");
+        }
       }
     });
 
@@ -118,6 +140,10 @@ async function testRecordingFlow(url) {
         this.stream = stream;
         this.mimeType = options.mimeType || "video/mp4";
         this.state = "inactive";
+        window.__hcrRecordedTrackCounts = {
+          audio: stream.getAudioTracks().length,
+          video: stream.getVideoTracks().length
+        };
       }
 
       static isTypeSupported(mimeType) {
@@ -178,6 +204,13 @@ async function testRecordingFlow(url) {
       return host?.hasAttribute("recording") &&
         host.shadowRoot.querySelector(".record-button")?.dataset.recording === "true";
     });
+    const recordingTracks = await page.evaluate(() => ({
+      streamId: window.__hcrRequestedTabCapture,
+      counts: window.__hcrRecordedTrackCounts
+    }));
+    assert(recordingTracks.streamId === "fake-tab-stream-id", "recording should request current tab capture");
+    assert(recordingTracks.counts.audio > 0, "recording should include an audio track");
+    assert(recordingTracks.counts.video > 0, "recording should include a video track");
     const recordingUi = await page.locator("html-camera-recorder").evaluate((host) => {
       const root = host.shadowRoot;
       return {

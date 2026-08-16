@@ -214,6 +214,10 @@ input[type="range"] {
   gap: 4px;
 }
 
+.record-area {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .segmented button {
   min-width: 0;
   height: 28px;

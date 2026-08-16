@@ -14,7 +14,9 @@
     radius: 24,
     shape: "rounded",
     borderWidth: 0,
-    borderColor: "#ffffff"
+    borderColor: "#ffffff",
+    recordArea: "tab",
+    cropRect: null
   };
 
   const ICONS = {
@@ -42,6 +44,8 @@
   let displayStream;
   let mixedStream;
   let audioContext;
+  let audioNodes = [];
+  let cropFrameId = 0;
   let mediaRecorder;
   let chunks = [];
   let recordingMime = "";
@@ -98,6 +102,13 @@
             <button type="button" data-shape="square">直角</button>
             <button type="button" data-shape="rounded">圆角</button>
             <button type="button" data-shape="circle">圆形</button>
+          </div>
+        </div>
+        <div class="field">
+          录制范围
+          <div class="segmented record-area" role="group" aria-label="录制范围">
+            <button type="button" data-record-area="tab">整页</button>
+            <button type="button" data-record-area="region">区域</button>
           </div>
         </div>
       </form>
@@ -158,6 +169,21 @@
         } else if (state.shape === "rounded" && state.radius === 0) {
           state.radius = 24;
         }
+        applyState();
+        persistState();
+      });
+    });
+
+    shadow.querySelectorAll("[data-record-area]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.recordArea = button.dataset.recordArea;
+        if (state.recordArea === "region") {
+          settingsPanel.hidden = true;
+          beginRegionSelection();
+          return;
+        }
+
+        state.cropRect = null;
         applyState();
         persistState();
       });
@@ -242,6 +268,106 @@
     }
   }
 
+  function beginRegionSelection() {
+    if (mediaRecorder?.state === "recording") {
+      return;
+    }
+
+    const layer = document.createElement("div");
+    const box = document.createElement("div");
+    let start = null;
+
+    layer.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "z-index:2147483647",
+      "cursor:crosshair",
+      "background:rgba(15,23,42,0.18)"
+    ].join(";");
+    box.style.cssText = [
+      "position:fixed",
+      "display:none",
+      "border:2px solid #2563eb",
+      "background:rgba(37,99,235,0.12)",
+      "box-shadow:0 0 0 9999px rgba(15,23,42,0.22)",
+      "pointer-events:none"
+    ].join(";");
+
+    layer.appendChild(box);
+    document.documentElement.appendChild(layer);
+    setStatus("拖拽选择录制区域");
+
+    layer.addEventListener("pointerdown", (event) => {
+      start = { x: event.clientX, y: event.clientY };
+      layer.setPointerCapture(event.pointerId);
+      drawSelectionBox(box, start.x, start.y, start.x, start.y);
+    });
+
+    layer.addEventListener("pointermove", (event) => {
+      if (!start) {
+        return;
+      }
+      drawSelectionBox(box, start.x, start.y, event.clientX, event.clientY);
+    });
+
+    layer.addEventListener("pointerup", (event) => {
+      if (!start) {
+        return;
+      }
+
+      const rect = normalizeRect(start.x, start.y, event.clientX, event.clientY);
+      layer.remove();
+      start = null;
+
+      if (rect.width < 40 || rect.height < 40) {
+        state.recordArea = "tab";
+        state.cropRect = null;
+        setStatus("区域太小，已恢复整页录制");
+      } else {
+        state.cropRect = rect;
+        setStatus("已选择录制区域");
+      }
+      applyState();
+      persistState();
+    });
+
+    window.addEventListener("keydown", cancelSelection, { once: true });
+
+    function cancelSelection(event) {
+      if (event.key !== "Escape" || !layer.isConnected) {
+        return;
+      }
+      layer.remove();
+      state.recordArea = "tab";
+      state.cropRect = null;
+      applyState();
+      persistState();
+      setStatus("已取消区域选择");
+    }
+  }
+
+  function drawSelectionBox(box, x1, y1, x2, y2) {
+    const rect = normalizeRect(x1, y1, x2, y2);
+    box.style.display = "block";
+    box.style.left = `${rect.x}px`;
+    box.style.top = `${rect.y}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
+  }
+
+  function normalizeRect(x1, y1, x2, y2) {
+    const left = clamp(Math.min(x1, x2), 0, window.innerWidth);
+    const top = clamp(Math.min(y1, y2), 0, window.innerHeight);
+    const right = clamp(Math.max(x1, x2), 0, window.innerWidth);
+    const bottom = clamp(Math.max(y1, y2), 0, window.innerHeight);
+    return {
+      x: Math.round(left),
+      y: Math.round(top),
+      width: Math.round(right - left),
+      height: Math.round(bottom - top)
+    };
+  }
+
   async function toggleCamera() {
     if (cameraStream) {
       stopCamera();
@@ -299,16 +425,14 @@
         await startCamera();
       }
 
-      setStatus("请选择当前标签页或窗口");
-      displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          frameRate: { ideal: 30, max: 60 },
-          cursor: "always"
-        },
-        audio: true
-      });
+      setRecordingUi(true);
+      setStatus(state.recordArea === "region" && state.cropRect ? "正在录制选定区域" : "正在录制当前标签页");
+      displayStream = await captureCurrentTabStream();
+      const videoStream = state.recordArea === "region" && state.cropRect
+        ? await createCroppedVideoStream(displayStream, state.cropRect)
+        : displayStream;
 
-      mixedStream = await createRecordingStream(displayStream, cameraStream);
+      mixedStream = await createRecordingStream(videoStream, displayStream, cameraStream);
       recordingMime = chooseRecordingMime();
       chunks = [];
 
@@ -322,7 +446,6 @@
       displayStream.getVideoTracks()[0]?.addEventListener("ended", stopRecording, { once: true });
 
       mediaRecorder.start(1000);
-      setRecordingUi(true);
       recordButton.dataset.recording = "true";
       recordButton.title = "停止录制";
       recordButton.setAttribute("aria-label", "停止录制");
@@ -331,19 +454,106 @@
       const extension = recordingMime.startsWith("video/mp4") ? "MP4" : "WebM";
       setStatus(`正在录制 ${extension}`);
     } catch (error) {
+      setRecordingUi(false);
       cleanupRecordingStreams();
-      setStatus(error.name === "NotAllowedError" ? "录制权限被取消" : "无法开始录制");
+      const message = error.message || "无法开始录制";
+      setStatus(message.includes("Extension has not been invoked") ? "请先点扩展图标里的“开始录制当前页”" : (error.name === "NotAllowedError" ? "录制权限被取消" : message));
       throw error;
     }
   }
 
-  async function createRecordingStream(screenStream, camStream) {
+  async function captureCurrentTabStream() {
+    const streamId = await getCurrentTabStreamId();
+    return navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          chromeMediaSource: "tab",
+          chromeMediaSourceId: streamId
+        }
+      },
+      video: {
+        mandatory: {
+          chromeMediaSource: "tab",
+          chromeMediaSourceId: streamId,
+          maxFrameRate: 60
+        }
+      }
+    });
+  }
+
+  function getCurrentTabStreamId() {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "HCR_GET_TAB_STREAM_ID" }, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        if (!response?.ok || !response.streamId) {
+          reject(new Error(response?.error || "无法捕获当前标签页"));
+          return;
+        }
+        resolve(response.streamId);
+      });
+    });
+  }
+
+  function createCroppedVideoStream(tabStream, rect) {
+    return new Promise((resolve, reject) => {
+      const tabVideo = document.createElement("video");
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      const sourceTrack = tabStream.getVideoTracks()[0];
+
+      if (!sourceTrack || !context) {
+        reject(new Error("无法创建区域录制画面"));
+        return;
+      }
+
+      canvas.width = Math.max(1, rect.width);
+      canvas.height = Math.max(1, rect.height);
+      tabVideo.muted = true;
+      tabVideo.playsInline = true;
+      tabVideo.srcObject = new MediaStream([sourceTrack]);
+      tabVideo.addEventListener("loadedmetadata", () => {
+        tabVideo.play().then(() => {
+          const canvasStream = canvas.captureStream(30);
+
+          function draw() {
+            if (!displayStream) {
+              return;
+            }
+
+            const scaleX = tabVideo.videoWidth / window.innerWidth;
+            const scaleY = tabVideo.videoHeight / window.innerHeight;
+            context.drawImage(
+              tabVideo,
+              rect.x * scaleX,
+              rect.y * scaleY,
+              rect.width * scaleX,
+              rect.height * scaleY,
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+            cropFrameId = window.requestAnimationFrame(draw);
+          }
+
+          draw();
+          resolve(canvasStream);
+        }).catch(reject);
+      }, { once: true });
+    });
+  }
+
+  async function createRecordingStream(videoStream, tabStream, camStream) {
     const output = new MediaStream();
-    screenStream.getVideoTracks().forEach((track) => output.addTrack(track));
+    videoStream.getVideoTracks().forEach((track) => output.addTrack(track));
 
     const audioTracks = [
-      ...screenStream.getAudioTracks(),
-      ...camStream.getAudioTracks()
+      ...tabStream.getAudioTracks().map((track) => ({ track, playToSpeakers: true })),
+      ...camStream.getAudioTracks().map((track) => ({ track, playToSpeakers: false }))
     ];
 
     if (audioTracks.length === 0) {
@@ -352,10 +562,15 @@
 
     audioContext = new AudioContext();
     const destination = audioContext.createMediaStreamDestination();
-    audioTracks.forEach((track) => {
+    audioNodes = [];
+    audioTracks.forEach(({ track, playToSpeakers }) => {
       const sourceStream = new MediaStream([track]);
       const source = audioContext.createMediaStreamSource(sourceStream);
       source.connect(destination);
+      if (playToSpeakers) {
+        source.connect(audioContext.destination);
+      }
+      audioNodes.push(source);
     });
     destination.stream.getAudioTracks().forEach((track) => output.addTrack(track));
 
@@ -404,6 +619,10 @@
     mediaRecorder = null;
     chunks = [];
     recordingMime = "";
+    if (cropFrameId) {
+      window.cancelAnimationFrame(cropFrameId);
+      cropFrameId = 0;
+    }
     if (displayStream) {
       displayStream.getTracks().forEach((track) => track.stop());
       displayStream = null;
@@ -416,6 +635,8 @@
       });
       mixedStream = null;
     }
+    audioNodes.forEach((node) => node.disconnect());
+    audioNodes = [];
     if (audioContext) {
       audioContext.close();
       audioContext = null;
@@ -455,6 +676,9 @@
     borderColorInput.value = state.borderColor;
     shadow.querySelectorAll("[data-shape]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.shape === state.shape));
+    });
+    shadow.querySelectorAll("[data-record-area]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.recordArea === state.recordArea));
     });
   }
 
@@ -504,6 +728,13 @@
         applyState();
         persistState();
         sendResponse({ ok: true });
+        return true;
+      }
+
+      if (message?.type === "HCR_START_RECORDING") {
+        startRecording()
+          .then(() => sendResponse({ ok: true }))
+          .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;
       }
 

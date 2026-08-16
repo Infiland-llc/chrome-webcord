@@ -5,7 +5,9 @@
   "description": "Add a draggable camera overlay to HTML pages and record the page activity together with the camera window.",
   "permissions": [
     "activeTab",
+    "tabCapture",
     "scripting",
+    "downloads",
     "storage"
   ],
   "host_permissions": [
@@ -14,6 +16,9 @@
   "action": {
     "default_title": "HTML Camera Recorder",
     "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "src/background.js"
   },
   "content_scripts": [
     {
