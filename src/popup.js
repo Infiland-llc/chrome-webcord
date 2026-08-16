@@ -1,5 +1,6 @@
 (function () {
   const status = document.getElementById("status");
+  const openPanel = document.getElementById("openPanel");
   const startRecording = document.getElementById("startRecording");
   const toggleOverlay = document.getElementById("toggleOverlay");
   const stopRecording = document.getElementById("stopRecording");
@@ -81,6 +82,19 @@
   function setStatus(text) {
     status.textContent = text;
   }
+
+  openPanel.addEventListener("click", async () => {
+    try {
+      const tab = await getActiveTab();
+      const response = await chrome.runtime.sendMessage({ type: "HCR_OPEN_PANEL", tabId: tab.id });
+      if (response?.ok === false) {
+        throw new Error(response.error || "无法打开浮动控制面板。");
+      }
+      setStatus("已打开浮动控制面板。");
+    } catch (error) {
+      setStatus(error.message || "无法打开浮动控制面板。");
+    }
+  });
 
   toggleOverlay.addEventListener("click", async () => {
     try {

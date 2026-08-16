@@ -84,7 +84,7 @@ async function testRecordingFlow(url) {
             }
             callback({ ok: false, error: "Unknown message" });
           },
-          onMessage: { addListener: () => undefined }
+          onMessage: { addListener: (listener) => { window.__hcrMessageListener = listener; } }
         },
         storage: {
           local: {
@@ -198,7 +198,9 @@ async function testRecordingFlow(url) {
       return Boolean(host?.shadowRoot?.querySelector("video")?.srcObject);
     });
 
-    await page.locator("html-camera-recorder .record-button").click();
+    await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_START_RECORDING", mode: "tab" }, {}, resolve);
+    }));
     await page.waitForFunction(() => {
       const host = document.querySelector("html-camera-recorder");
       return host?.hasAttribute("recording") &&
@@ -225,7 +227,9 @@ async function testRecordingFlow(url) {
     assert(recordingUi.panelShadow === "none", "panel shadow should be removed while recording");
     assert(recordingUi.panelRadius === "0px", "panel corners should be removed while recording");
     await page.waitForTimeout(180);
-    await page.locator("html-camera-recorder .preview-frame").dblclick();
+    await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_STOP_RECORDING" }, {}, resolve);
+    }));
     await page.waitForFunction(() => window.__hcrDownloaded?.download?.endsWith(".mp4"));
 
     const downloadName = await page.evaluate(() => window.__hcrDownloaded.download);

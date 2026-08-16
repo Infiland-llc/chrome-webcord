@@ -416,19 +416,22 @@
       return;
     }
 
-    await startRecording();
+    await startRecording({ mode: "tab" });
   }
 
-  async function startRecording() {
+  async function startRecording(options = {}) {
     try {
       if (!cameraStream) {
         await startCamera();
       }
 
       setRecordingUi(true);
-      setStatus(state.recordArea === "region" && state.cropRect ? "正在录制选定区域" : "正在录制当前标签页");
-      displayStream = await captureCurrentTabStream();
-      const videoStream = state.recordArea === "region" && state.cropRect
+      const mode = options.mode || "tab";
+      setStatus(mode === "desktop" ? "正在录制屏幕/窗口" : (state.recordArea === "region" && state.cropRect ? "正在录制选定区域" : "正在录制当前标签页"));
+      displayStream = mode === "desktop"
+        ? await captureDesktopStream(options.streamId, options.canRequestAudioTrack)
+        : await captureCurrentTabStream();
+      const videoStream = mode === "tab" && state.recordArea === "region" && state.cropRect
         ? await createCroppedVideoStream(displayStream, state.cropRect)
         : displayStream;
 
@@ -479,6 +482,30 @@
         }
       }
     });
+  }
+
+  async function captureDesktopStream(streamId, canRequestAudioTrack) {
+    if (!streamId) {
+      throw new Error("没有可用的屏幕录制来源。");
+    }
+
+    const constraints = {
+      audio: canRequestAudioTrack ? {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: streamId
+        }
+      } : false,
+      video: {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: streamId,
+          maxFrameRate: 60
+        }
+      }
+    };
+
+    return navigator.mediaDevices.getUserMedia(constraints);
   }
 
   function getCurrentTabStreamId() {
@@ -715,6 +742,11 @@
 
   function bindChromeMessages() {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type === "HCR_PING") {
+        sendResponse({ ok: true });
+        return true;
+      }
+
       if (message?.type === "HCR_TOGGLE_OVERLAY") {
         state.visible = !state.visible;
         applyState();
@@ -732,7 +764,7 @@
       }
 
       if (message?.type === "HCR_START_RECORDING") {
-        startRecording()
+        startRecording(message)
           .then(() => sendResponse({ ok: true }))
           .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;

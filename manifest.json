@@ -6,8 +6,11 @@
   "permissions": [
     "activeTab",
     "tabCapture",
+    "desktopCapture",
     "scripting",
     "downloads",
+    "tabs",
+    "windows",
     "storage"
   ],
   "host_permissions": [

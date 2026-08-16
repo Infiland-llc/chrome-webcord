@@ -95,6 +95,10 @@
   background: #dc2626;
 }
 
+.record-button {
+  display: none;
+}
+
 .preview-frame {
   position: relative;
   min-height: 0;

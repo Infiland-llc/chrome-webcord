@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chrome Webcord Panel</title>
+    <link rel="stylesheet" href="src/panel.css">
+  </head>
+  <body>
+    <main class="panel-shell">
+      <section class="controls">
+        <header>
+          <h1>Chrome Webcord</h1>
+          <p id="status" role="status">选择目标后开始录制。</p>
+        </header>
+
+        <label class="field">
+          录制目标
+          <select id="targetTab"></select>
+        </label>
+
+        <div class="field">
+          录制模式
+          <div class="segmented" role="group" aria-label="录制模式">
+            <button id="modeTab" type="button" class="selected">当前标签页</button>
+            <button id="modeScreen" type="button">屏幕/窗口</button>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button id="startRecording" type="button" class="primary">开始录制</button>
+          <button id="stopRecording" type="button">停止录制</button>
+        </div>
+
+        <div class="button-row">
+          <button id="refreshTabs" type="button">刷新标签页</button>
+          <button id="toggleOverlay" type="button">显示/隐藏摄像头</button>
+        </div>
+      </section>
+
+      <section id="prompter" class="prompter">
+        <div id="prompterHandle" class="prompter-handle">
+          <strong>题词板</strong>
+          <span>拖动这里移动</span>
+        </div>
+
+        <label class="field">
+          透明度
+          <input id="opacity" type="range" min="20" max="100" step="1" value="72">
+        </label>
+
+        <textarea id="promptText" spellcheck="false">在这里输入题词内容。这个题词板属于扩展浮窗，不会被当前标签页录制捕获。</textarea>
+
+        <div class="button-row">
+          <button id="copyPrompt" type="button">复制文本</button>
+          <button id="clearPrompt" type="button">清空</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="src/panel.js"></script>
+  </body>
+</html>
