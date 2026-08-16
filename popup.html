@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HTML Camera Recorder</title>
+    <link rel="stylesheet" href="src/popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header>
+        <h1>HTML Camera Recorder</h1>
+        <p>在当前页面显示摄像头浮窗，并录制页面活动。</p>
+      </header>
+
+      <div class="actions">
+        <button id="toggleOverlay" type="button">显示 / 隐藏浮窗</button>
+        <button id="stopRecording" type="button">停止录制</button>
+        <button id="resetOverlay" type="button">重置浮窗</button>
+      </div>
+
+      <p class="note">
+        录制时请选择当前标签页或当前窗口作为共享来源。Chrome 支持 MP4 时会保存 MP4，否则会回退到 WebM。
+      </p>
+
+      <p id="status" class="status" role="status"></p>
+    </main>
+    <script src="src/popup.js"></script>
+  </body>
+</html>
