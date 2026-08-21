@@ -64,6 +64,7 @@
   let microphoneConnected = false;
   let audioNodes = [];
   let cropFrameId = 0;
+  let cropFrameFromVideo = false;
   let cropCanvas;
   let cropVideo;
   let cropTargetEl;
@@ -780,11 +781,13 @@
         : displayStream;
 
       mixedStream = await createRecordingStream(videoStream);
-      recordingMime = chooseRecordingMime();
+      preferDetailVideoTracks(mixedStream);
+      const recorderOptions = chooseRecordingOptions(mixedStream);
+      recordingMime = recorderOptions.mimeType || "";
       chunks = [];
       discardRecording = false;
 
-      mediaRecorder = new MediaRecorder(mixedStream, recordingMime ? { mimeType: recordingMime } : undefined);
+      mediaRecorder = new MediaRecorder(mixedStream, recorderOptions);
       mediaRecorder.addEventListener("dataavailable", (event) => {
         if (event.data && event.data.size > 0) {
           chunks.push(event.data);
@@ -813,16 +816,33 @@
 
   async function captureCurrentTabStream() {
     const streamId = await getCurrentTabStreamId();
-    return navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: "tab",
-          chromeMediaSourceId: streamId,
-          maxFrameRate: 60
-        }
+    const size = getPreferredCaptureSize();
+    return captureWithFallback([
+      {
+        chromeMediaSource: "tab",
+        chromeMediaSourceId: streamId,
+        minWidth: size.width,
+        maxWidth: size.width,
+        minHeight: size.height,
+        maxHeight: size.height,
+        minFrameRate: 30,
+        maxFrameRate: 60
+      },
+      {
+        chromeMediaSource: "tab",
+        chromeMediaSourceId: streamId,
+        minWidth: size.width,
+        maxWidth: Math.max(size.width, 1920),
+        minHeight: size.height,
+        maxHeight: Math.max(size.height, 1080),
+        maxFrameRate: 60
+      },
+      {
+        chromeMediaSource: "tab",
+        chromeMediaSourceId: streamId,
+        maxFrameRate: 60
       }
-    });
+    ]);
   }
 
   async function captureDesktopStream(streamId) {
@@ -830,18 +850,42 @@
       throw new Error("没有可用的屏幕录制来源。");
     }
 
-    const constraints = {
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: "desktop",
-          chromeMediaSourceId: streamId,
-          maxFrameRate: 60
-        }
+    return captureWithFallback([
+      {
+        chromeMediaSource: "desktop",
+        chromeMediaSourceId: streamId,
+        minFrameRate: 30,
+        maxFrameRate: 60
+      },
+      {
+        chromeMediaSource: "desktop",
+        chromeMediaSourceId: streamId,
+        maxFrameRate: 60
       }
-    };
+    ]);
+  }
 
-    return navigator.mediaDevices.getUserMedia(constraints);
+  async function captureWithFallback(mandatoryList) {
+    let lastError;
+    for (const mandatory of mandatoryList) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { mandatory }
+        });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("无法捕获当前标签页");
+  }
+
+  function getPreferredCaptureSize() {
+    const dpr = window.devicePixelRatio || 1;
+    return {
+      width: Math.max(2, Math.round(window.innerWidth * dpr)),
+      height: Math.max(2, Math.round(window.innerHeight * dpr))
+    };
   }
 
   function getCurrentTabStreamId() {
@@ -894,6 +938,7 @@
     if (!sourceTrack) {
       throw new Error("无法创建区域录制画面");
     }
+    preferDetailVideoTracks(tabStream);
     return cropTabStreamWithCanvas(sourceTrack, rect);
   }
 
@@ -935,7 +980,7 @@
       cleanupCropElements();
       const tabVideo = document.createElement("video");
       const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
+      const context = canvas.getContext("2d", { alpha: false, desynchronized: true }) || canvas.getContext("2d");
 
       if (!context) {
         reject(new Error("无法创建区域录制画面"));
@@ -968,7 +1013,8 @@
 
           canvas.width = source.width;
           canvas.height = source.height;
-          context.imageSmoothingEnabled = false;
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
           context.drawImage(
             tabVideo,
             source.x,
@@ -981,14 +1027,18 @@
             canvas.height
           );
 
-          const canvasStream = canvas.captureStream(30);
+          const canvasStream = canvas.captureStream(60);
           const canvasTrack = canvasStream.getVideoTracks()[0];
+          preferDetailVideoTracks(canvasStream);
           if (canvasTrack?.muted) {
             await Promise.race([
               new Promise((done) => canvasTrack.addEventListener("unmute", done, { once: true })),
               new Promise((done) => window.setTimeout(done, 400))
             ]);
           }
+
+          const useVideoFrames = typeof tabVideo.requestVideoFrameCallback === "function";
+          cropFrameFromVideo = useVideoFrames;
 
           function draw() {
             if (!displayStream) {
@@ -1005,10 +1055,16 @@
               canvas.width,
               canvas.height
             );
+            if (useVideoFrames) {
+              cropFrameId = tabVideo.requestVideoFrameCallback(draw);
+              return;
+            }
             cropFrameId = window.requestAnimationFrame(draw);
           }
 
-          cropFrameId = window.requestAnimationFrame(draw);
+          cropFrameId = useVideoFrames
+            ? tabVideo.requestVideoFrameCallback(draw)
+            : window.requestAnimationFrame(draw);
           resolve(canvasStream);
         }).catch(reject);
       }, { once: true });
@@ -1017,9 +1073,14 @@
 
   function cleanupCropElements() {
     if (cropFrameId) {
-      window.cancelAnimationFrame(cropFrameId);
+      if (cropFrameFromVideo && typeof cropVideo?.cancelVideoFrameCallback === "function") {
+        cropVideo.cancelVideoFrameCallback(cropFrameId);
+      } else {
+        window.cancelAnimationFrame(cropFrameId);
+      }
       cropFrameId = 0;
     }
+    cropFrameFromVideo = false;
     cropVideo?.remove();
     cropCanvas?.remove();
     cropVideo = null;
@@ -1407,7 +1468,12 @@
 
   function chooseRecordingMime() {
     const candidates = [
+      'video/mp4;codecs="avc1.640029,mp4a.40.2"',
+      'video/mp4;codecs="avc1.640028,mp4a.40.2"',
+      'video/mp4;codecs="avc1.4D4029,mp4a.40.2"',
+      'video/mp4;codecs="avc1.64001F,mp4a.40.2"',
       'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+      'video/mp4;codecs="avc1.640029"',
       'video/mp4;codecs="avc1.42E01E"',
       "video/mp4",
       "video/webm;codecs=vp9,opus",
@@ -1415,6 +1481,31 @@
       "video/webm"
     ];
     return candidates.find((mime) => MediaRecorder.isTypeSupported(mime)) || "";
+  }
+
+  function chooseRecordingOptions(stream) {
+    const mimeType = chooseRecordingMime();
+    const track = stream.getVideoTracks()[0];
+    const settings = typeof track?.getSettings === "function" ? track.getSettings() : {};
+    const width = Number(settings.width) || 1280;
+    const height = Number(settings.height) || 720;
+    const videoBitsPerSecond = Math.round(Math.min(12_000_000, Math.max(5_000_000, width * height * 3.2)));
+    const options = {
+      videoBitsPerSecond,
+      audioBitsPerSecond: 160000
+    };
+    if (mimeType) {
+      options.mimeType = mimeType;
+    }
+    return options;
+  }
+
+  function preferDetailVideoTracks(stream) {
+    stream?.getVideoTracks().forEach((track) => {
+      if ("contentHint" in track) {
+        track.contentHint = "detail";
+      }
+    });
   }
 
   function applyState() {
