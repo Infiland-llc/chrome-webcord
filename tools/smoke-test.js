@@ -52,8 +52,23 @@ async function testLoadedExtension(url) {
     await dragFrom(page, afterDragBox.x + afterDragBox.width - 4, afterDragBox.y + afterDragBox.height - 4, 42, 36);
     const resizedBox = await page.locator("html-camera-recorder").boundingBox();
     assert(resizedBox.width > afterDragBox.width, "overlay should be resizable");
+    assert(Math.abs(resizedBox.width - resizedBox.height) < 2, "overlay should keep a 1:1 aspect ratio");
+
+    const cameraButtonCount = await page.locator("html-camera-recorder .camera-button").count();
+    assert(cameraButtonCount === 0, "overlay should not show a camera toggle button");
 
     await page.locator("html-camera-recorder .settings-button").click();
+    const hideButtonCount = await page.locator("html-camera-recorder .hide-button").count();
+    assert(hideButtonCount === 0, "overlay should not show a close button");
+    const recordAreaCount = await page.locator("html-camera-recorder [data-record-area]").count();
+    assert(recordAreaCount === 0, "record area controls should not appear on the camera overlay");
+    const radiusCount = await page.locator("html-camera-recorder .radius-input").count();
+    assert(radiusCount === 0, "settings should not show a corner-radius slider");
+    const squareLabel = await page.locator("html-camera-recorder [data-shape='square']").textContent();
+    assert(squareLabel.includes("方形"), "shape control should offer a rounded square option");
+    const squareIcon = await page.locator("html-camera-recorder [data-shape='square'] svg").count();
+    const circleIcon = await page.locator("html-camera-recorder [data-shape='circle'] svg").count();
+    assert(squareIcon === 1 && circleIcon === 1, "shape buttons should show icons");
     await page.locator("html-camera-recorder [data-shape='circle']").click();
     const shape = await page.locator("html-camera-recorder").evaluate((host) => {
       return host.shadowRoot.querySelector(".preview-frame").dataset.shape;
@@ -154,18 +169,38 @@ async function testRecordingFlow(url) {
         this.state = "recording";
         this.timer = window.setInterval(() => {
           const event = new Event("dataavailable");
-          event.data = new Blob(["fake-recording"], { type: this.mimeType });
+          event.data = new Blob(["fake-recording-chunk"], { type: this.mimeType });
+          this.dispatchEvent(event);
+        }, 80);
+      }
+
+      pause() {
+        if (this.state !== "recording") {
+          return;
+        }
+        window.clearInterval(this.timer);
+        this.state = "paused";
+      }
+
+      resume() {
+        if (this.state !== "paused") {
+          return;
+        }
+        this.state = "recording";
+        this.timer = window.setInterval(() => {
+          const event = new Event("dataavailable");
+          event.data = new Blob(["fake-recording-chunk"], { type: this.mimeType });
           this.dispatchEvent(event);
         }, 80);
       }
 
       stop() {
-        if (this.state !== "recording") {
+        if (this.state === "inactive") {
           return;
         }
         window.clearInterval(this.timer);
         const event = new Event("dataavailable");
-        event.data = new Blob(["fake-recording"], { type: this.mimeType });
+        event.data = new Blob(["fake-recording-trailer"], { type: this.mimeType });
         this.dispatchEvent(event);
         this.state = "inactive";
         this.dispatchEvent(new Event("stop"));
@@ -191,12 +226,12 @@ async function testRecordingFlow(url) {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.addScriptTag({ path: path.join(rootDir, "src", "content.js") });
     await page.waitForSelector("html-camera-recorder", { timeout: 5000 });
-
-    await page.locator("html-camera-recorder .camera-button").click();
     await page.waitForFunction(() => {
       const host = document.querySelector("html-camera-recorder");
       return Boolean(host?.shadowRoot?.querySelector("video")?.srcObject);
     });
+    const cameraButtonCount = await page.locator("html-camera-recorder .camera-button").count();
+    assert(cameraButtonCount === 0, "overlay should not show a camera toggle button");
 
     await page.evaluate(() => new Promise((resolve) => {
       window.__hcrMessageListener({ type: "HCR_START_RECORDING", mode: "tab" }, {}, resolve);
@@ -226,18 +261,100 @@ async function testRecordingFlow(url) {
     assert(recordingUi.resizeDisplay === "none", "resize handle should be hidden while recording");
     assert(recordingUi.panelShadow === "none", "panel shadow should be removed while recording");
     assert(recordingUi.panelRadius === "0px", "panel corners should be removed while recording");
+    const extraBar = await page.locator("html-camera-recording-bar").count();
+    assert(extraBar === 0, "recording controls should not appear on the page");
+
+    const pausedState = await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_TOGGLE_PAUSE" }, {}, resolve);
+    }));
+    assert(pausedState.ok && pausedState.recording && pausedState.paused, "recording should pause");
+    const pausedElapsed = pausedState.elapsedMs;
+    await page.waitForTimeout(120);
+    const stillPaused = await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_GET_OVERLAY_STATE" }, {}, resolve);
+    }));
+    assert(stillPaused.paused, "recording should stay paused");
+    assert(stillPaused.elapsedMs <= pausedElapsed + 30, "timer should freeze while paused");
+
+    const resumedState = await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_TOGGLE_PAUSE" }, {}, resolve);
+    }));
+    assert(resumedState.ok && resumedState.recording && !resumedState.paused, "recording should resume");
+
     await page.waitForTimeout(180);
     await page.evaluate(() => new Promise((resolve) => {
       window.__hcrMessageListener({ type: "HCR_STOP_RECORDING" }, {}, resolve);
     }));
     await page.waitForFunction(() => window.__hcrDownloaded?.download?.endsWith(".mp4"));
+    await page.waitForSelector("html-camera-toast", { timeout: 3000 });
+    const toastText = await page.locator("html-camera-toast").evaluate((host) => {
+      return host.shadowRoot?.querySelector("div")?.textContent?.trim();
+    });
+    assert(toastText === "视频已下载。", "page should show a centered download toast");
 
     const downloadName = await page.evaluate(() => window.__hcrDownloaded.download);
     assert(downloadName.startsWith("html-camera-recording-"), "recording should use the expected filename prefix");
+    const resumedStopPayload = await readDownloadedRecording(page);
+    assert(resumedStopPayload.includes("fake-recording-trailer"), "stop after resume should keep the media trailer");
+
+    await page.evaluate(() => {
+      window.__hcrDownloaded = null;
+    });
+    await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_START_RECORDING", mode: "tab" }, {}, resolve);
+    }));
+    await page.waitForFunction(() => {
+      const host = document.querySelector("html-camera-recorder");
+      return host?.hasAttribute("recording") &&
+        host.shadowRoot.querySelector(".record-button")?.dataset.recording === "true";
+    });
+    await page.waitForTimeout(180);
+    const pauseThenStopState = await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_TOGGLE_PAUSE" }, {}, resolve);
+    }));
+    assert(pauseThenStopState.ok && pauseThenStopState.paused, "second recording should pause before stop");
+    await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_STOP_RECORDING" }, {}, resolve);
+    }));
+    await page.waitForFunction(() => window.__hcrDownloaded?.download?.endsWith(".mp4"));
+    const pausedStopPayload = await readDownloadedRecording(page);
+    assert(pausedStopPayload.includes("fake-recording-trailer"), "pause-then-stop should keep the media trailer");
+
+    await page.evaluate(() => {
+      window.__hcrDownloaded = null;
+    });
+    await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_START_RECORDING", mode: "tab" }, {}, resolve);
+    }));
+    await page.waitForFunction(() => {
+      const host = document.querySelector("html-camera-recorder");
+      return host?.hasAttribute("recording") &&
+        host.shadowRoot.querySelector(".record-button")?.dataset.recording === "true";
+    });
+    const canceledState = await page.evaluate(() => new Promise((resolve) => {
+      window.__hcrMessageListener({ type: "HCR_CANCEL_RECORDING" }, {}, resolve);
+    }));
+    assert(canceledState.ok && !canceledState.recording, "cancel should return to idle recording state");
+    const canceledDownload = await page.evaluate(() => window.__hcrDownloaded);
+    assert(!canceledDownload, "cancel should not download a recording");
+    const canceledUi = await page.locator("html-camera-recorder").evaluate((host) => {
+      return {
+        recording: host.hasAttribute("recording"),
+        buttonRecording: host.shadowRoot.querySelector(".record-button")?.dataset.recording
+      };
+    });
+    assert(!canceledUi.recording && canceledUi.buttonRecording === "false", "overlay should leave recording mode after cancel");
   } finally {
     await context.close();
     await browser.close();
   }
+}
+
+async function readDownloadedRecording(page) {
+  return page.evaluate(async () => {
+    const response = await fetch(window.__hcrDownloaded.href);
+    return response.text();
+  });
 }
 
 async function dragFrom(page, x, y, dx, dy) {

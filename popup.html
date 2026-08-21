@@ -3,29 +3,41 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HTML Camera Recorder</title>
+    <title>Webcord</title>
     <link rel="stylesheet" href="src/popup.css">
   </head>
   <body>
     <main class="popup">
-      <header>
-        <h1>HTML Camera Recorder</h1>
-        <p>在当前页面显示摄像头浮窗，并录制页面活动。</p>
-      </header>
-
-      <div class="actions">
-        <button id="openPanel" type="button">打开浮动控制面板</button>
-        <button id="startRecording" type="button">开始录制当前页</button>
-        <button id="toggleOverlay" type="button">显示 / 隐藏浮窗</button>
-        <button id="stopRecording" type="button">停止录制</button>
-        <button id="resetOverlay" type="button">重置浮窗</button>
+      <div class="popup-bar">
+        <button id="recordButton" class="icon-button" type="button" title="录制" aria-label="录制">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle></svg>
+        </button>
+        <span id="recordTimer" class="record-timer" hidden>00:00</span>
+        <button id="pauseButton" class="icon-button" type="button" title="暂停" aria-label="暂停" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+        </button>
+        <button id="cancelButton" class="icon-button" type="button" title="取消录制" aria-label="取消录制" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4C7.58 4 4.01 7.58 4.01 12S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"></path></svg>
+        </button>
+        <button id="cameraButton" class="icon-button toggle" type="button" title="隐藏摄像头" aria-label="隐藏摄像头" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 10l4.5-2.5v9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
+        </button>
+        <button id="micButton" class="icon-button toggle" type="button" title="关闭麦克风" aria-label="关闭麦克风" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg>
+        </button>
+        <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsMenu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.03.03a2 2 0 1 1-2.83 2.83l-.03-.03A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .58V20a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-.58 1.7 1.7 0 0 0-1.88.34l-.03.03a2 2 0 1 1-2.83-2.83l.03-.03A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-.58-1H4a2 2 0 1 1 0-4h.05a1.7 1.7 0 0 0 .58-1 1.7 1.7 0 0 0-.34-1.88l-.03-.03a2 2 0 1 1 2.83-2.83l.03.03A1.7 1.7 0 0 0 9 4.63c.34-.12.68-.32 1-.58V4a2 2 0 1 1 4 0v.05c.32.26.66.46 1 .58a1.7 1.7 0 0 0 1.88-.34l.03-.03a2 2 0 1 1 2.83 2.83l-.03.03A1.7 1.7 0 0 0 19.37 9c.12.34.32.68.58 1H20a2 2 0 1 1 0 4h-.05c-.26.32-.46.66-.55 1Z"></path></svg>
+        </button>
       </div>
-
-      <p class="note">
-        推荐打开浮动控制面板进行录制。题词板和控制按钮不会进入当前标签页录制。
-      </p>
-
-      <p id="status" class="status" role="status"></p>
+      <section id="settingsMenu" class="settings-menu" hidden>
+        <div class="field">
+          录制范围
+          <div class="segmented" role="group" aria-label="录制范围">
+            <button id="recordAreaTab" type="button" data-record-area="tab">整页</button>
+            <button id="recordAreaRegion" type="button" data-record-area="region">区域</button>
+          </div>
+        </div>
+      </section>
     </main>
     <script src="src/popup.js"></script>
   </body>

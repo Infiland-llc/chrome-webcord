@@ -1,5 +1,5 @@
 const PANEL_WIDTH = 420;
-const PANEL_HEIGHT = 640;
+const PANEL_HEIGHT = 480;
 const panelState = {
   windowId: null,
   targetTabId: null
@@ -13,6 +13,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "HCR_OPEN_PANEL") {
     openPanel(message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_TOGGLE_PANEL") {
+    togglePanel(message.tabId)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -39,17 +46,87 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "HCR_PANEL_STOP") {
-    sendToTarget({ type: "HCR_STOP_RECORDING" })
+    sendToTarget({ type: "HCR_STOP_RECORDING" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_PANEL_CANCEL") {
+    sendToTarget({ type: "HCR_CANCEL_RECORDING" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_TOGGLE_PAUSE") {
+    sendToTarget({ type: "HCR_TOGGLE_PAUSE" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_GET_OVERLAY_STATE") {
+    sendToTarget({ type: "HCR_GET_OVERLAY_STATE" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_TOGGLE_OVERLAY") {
+    sendToTarget({ type: "HCR_TOGGLE_OVERLAY" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_SET_RECORD_AREA") {
+    sendToTarget({ type: "HCR_SET_RECORD_AREA", recordArea: message.recordArea }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_TOGGLE_MICROPHONE") {
+    sendToTarget({ type: "HCR_TOGGLE_MICROPHONE" }, message.tabId)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
   if (message?.type === "HCR_PANEL_TOGGLE_OVERLAY") {
-    sendToTarget({ type: "HCR_TOGGLE_OVERLAY" })
+    sendToTarget({ type: "HCR_TOGGLE_OVERLAY" }, message.tabId)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
+  }
+
+  if (message?.type === "HCR_PANEL_TOGGLE_PROMPTER") {
+    sendToTarget({ type: "HCR_TOGGLE_PROMPTER" })
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_PANEL_RESET_OVERLAY") {
+    sendToTarget({ type: "HCR_RESET_OVERLAY" })
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_RECORDING_STATE") {
+    if (sender.tab) {
+      chrome.runtime.sendMessage({
+        type: "HCR_RECORDING_STATE",
+        ok: true,
+        recording: Boolean(message.recording),
+        paused: Boolean(message.paused),
+        elapsedMs: Number(message.elapsedMs) || 0
+      }).catch(() => undefined);
+    }
+    sendResponse({ ok: true });
+    return false;
   }
 
   return false;
@@ -60,6 +137,21 @@ chrome.windows.onRemoved.addListener((windowId) => {
     panelState.windowId = null;
   }
 });
+
+async function togglePanel(tabId) {
+  if (panelState.windowId) {
+    try {
+      await chrome.windows.remove(panelState.windowId);
+      panelState.windowId = null;
+      return { ok: true, open: false };
+    } catch (_error) {
+      panelState.windowId = null;
+    }
+  }
+
+  const result = await openPanel(tabId);
+  return { ...result, open: true };
+}
 
 async function openPanel(tabId) {
   if (tabId) {
@@ -111,7 +203,24 @@ async function startFromPanel(message) {
     return startDesktopCapture(tabId);
   }
 
-  return sendToTarget({ type: "HCR_START_RECORDING", mode: "tab" });
+  const result = await sendToTarget({ type: "HCR_START_RECORDING", mode: "tab" });
+  await reopenActionPopup(tabId);
+  return result;
+}
+
+async function reopenActionPopup(tabId) {
+  if (typeof chrome.action?.openPopup !== "function") {
+    return;
+  }
+  let windowId;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    windowId = tab.windowId;
+  } catch (_error) {
+    return;
+  }
+  const open = () => chrome.action.openPopup(windowId ? { windowId } : {}).catch(() => undefined);
+  await open();
 }
 
 function startDesktopCapture(tabId) {
@@ -147,10 +256,13 @@ function startDesktopCapture(tabId) {
   });
 }
 
-async function sendToTarget(message) {
-  const tabId = await getTargetTabId();
-  await ensureContentScript(tabId);
-  return chrome.tabs.sendMessage(tabId, message).then(normalizeResponse);
+async function sendToTarget(message, tabId) {
+  if (tabId) {
+    panelState.targetTabId = Number(tabId);
+  }
+  const targetTabId = await getTargetTabId();
+  await ensureContentScript(targetTabId);
+  return chrome.tabs.sendMessage(targetTabId, message).then(normalizeResponse);
 }
 
 async function getTargetTabId() {

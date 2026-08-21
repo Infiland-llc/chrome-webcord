@@ -36,24 +36,10 @@
           <button id="refreshTabs" type="button">刷新标签页</button>
           <button id="toggleOverlay" type="button">显示/隐藏摄像头</button>
         </div>
-      </section>
-
-      <section id="prompter" class="prompter">
-        <div id="prompterHandle" class="prompter-handle">
-          <strong>题词板</strong>
-          <span>拖动这里移动</span>
-        </div>
-
-        <label class="field">
-          透明度
-          <input id="opacity" type="range" min="20" max="100" step="1" value="72">
-        </label>
-
-        <textarea id="promptText" spellcheck="false">在这里输入题词内容。这个题词板属于扩展浮窗，不会被当前标签页录制捕获。</textarea>
 
         <div class="button-row">
-          <button id="copyPrompt" type="button">复制文本</button>
-          <button id="clearPrompt" type="button">清空</button>
+          <button id="togglePrompter" type="button">显示/隐藏提词板</button>
+          <button id="resetOverlay" type="button">重置浮窗</button>
         </div>
       </section>
     </main>

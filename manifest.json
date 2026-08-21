@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "HTML Camera Recorder",
+  "name": "Webcord",
   "version": "1.0.0",
   "description": "Add a draggable camera overlay to HTML pages and record the page activity together with the camera window.",
   "permissions": [
@@ -17,7 +17,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_title": "HTML Camera Recorder",
+    "default_title": "Webcord",
     "default_popup": "popup.html"
   },
   "background": {

@@ -7,12 +7,8 @@
   const stopRecording = document.getElementById("stopRecording");
   const refreshTabs = document.getElementById("refreshTabs");
   const toggleOverlay = document.getElementById("toggleOverlay");
-  const prompter = document.getElementById("prompter");
-  const prompterHandle = document.getElementById("prompterHandle");
-  const opacity = document.getElementById("opacity");
-  const promptText = document.getElementById("promptText");
-  const copyPrompt = document.getElementById("copyPrompt");
-  const clearPrompt = document.getElementById("clearPrompt");
+  const togglePrompter = document.getElementById("togglePrompter");
+  const resetOverlay = document.getElementById("resetOverlay");
 
   let mode = "tab";
 
@@ -20,7 +16,6 @@
 
   async function boot() {
     bindModeButtons();
-    bindPrompter();
     bindActions();
     await loadTabs();
   }
@@ -52,57 +47,16 @@
       await sendPanelMessage({ type: "HCR_PANEL_TOGGLE_OVERLAY" }, "已切换摄像头浮窗。");
     });
 
-    copyPrompt.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(promptText.value);
-        setStatus("题词文本已复制。");
-      } catch (_error) {
-        promptText.select();
-        document.execCommand("copy");
-        setStatus("题词文本已复制。");
-      }
-    });
-
-    clearPrompt.addEventListener("click", () => {
-      promptText.value = "";
-      setStatus("题词板已清空。");
-    });
-  }
-
-  function bindPrompter() {
-    opacity.addEventListener("input", () => {
-      prompter.style.backgroundColor = `rgba(17, 24, 39, ${Number(opacity.value) / 100})`;
-    });
-
-    let start = null;
-    prompterHandle.addEventListener("pointerdown", (event) => {
-      const rect = prompter.getBoundingClientRect();
-      start = {
-        pointerId: event.pointerId,
-        pointerX: event.clientX,
-        pointerY: event.clientY,
-        x: rect.left,
-        y: rect.top
-      };
-      prompterHandle.setPointerCapture(event.pointerId);
-    });
-
-    prompterHandle.addEventListener("pointermove", (event) => {
-      if (!start || event.pointerId !== start.pointerId) {
+    togglePrompter.addEventListener("click", async () => {
+      const response = await sendPanelMessage({ type: "HCR_PANEL_TOGGLE_PROMPTER" });
+      if (response?.ok === false) {
         return;
       }
-
-      const x = clamp(start.x + event.clientX - start.pointerX, 0, window.innerWidth - prompter.offsetWidth);
-      const y = clamp(start.y + event.clientY - start.pointerY, 0, window.innerHeight - prompter.offsetHeight);
-      prompter.style.left = `${Math.round(x)}px`;
-      prompter.style.top = `${Math.round(y)}px`;
+      setStatus(response?.visible ? "提词板已显示。" : "提词板已隐藏。");
     });
 
-    prompterHandle.addEventListener("pointerup", () => {
-      start = null;
-    });
-    prompterHandle.addEventListener("pointercancel", () => {
-      start = null;
+    resetOverlay.addEventListener("click", async () => {
+      await sendPanelMessage({ type: "HCR_PANEL_RESET_OVERLAY" }, "已重置浮窗。");
     });
   }
 
@@ -144,17 +98,17 @@
       if (response?.ok === false) {
         throw new Error(response.error || "操作失败。");
       }
-      setStatus(successText);
+      if (successText) {
+        setStatus(successText);
+      }
+      return response;
     } catch (error) {
       setStatus(error.message || "操作失败。");
+      return { ok: false, error: error.message };
     }
   }
 
   function setStatus(text) {
     status.textContent = text;
-  }
-
-  function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), Math.max(min, max));
   }
 })();
