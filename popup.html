@@ -9,36 +9,69 @@
   <body>
     <main class="popup">
       <div class="popup-bar">
-        <button id="recordButton" class="icon-button" type="button" title="录制" aria-label="录制">
+        <button id="recordButton" class="icon-button" type="button" title="录制" aria-label="录制" data-i18n-title="record">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle></svg>
         </button>
         <span id="recordTimer" class="record-timer" hidden>00:00</span>
-        <button id="pauseButton" class="icon-button" type="button" title="暂停" aria-label="暂停" hidden>
+        <button id="pauseButton" class="icon-button" type="button" title="暂停" aria-label="暂停" hidden data-i18n-title="pause">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
         </button>
-        <button id="cancelButton" class="icon-button" type="button" title="取消录制" aria-label="取消录制" hidden>
+        <button id="cancelButton" class="icon-button" type="button" title="取消录制" aria-label="取消录制" hidden data-i18n-title="cancelRecord">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4C7.58 4 4.01 7.58 4.01 12S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"></path></svg>
         </button>
-        <button id="cameraButton" class="icon-button toggle" type="button" title="隐藏摄像头" aria-label="隐藏摄像头" aria-pressed="true">
+        <button id="cameraButton" class="icon-button toggle" type="button" title="显示摄像头" aria-label="显示摄像头" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 10l4.5-2.5v9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>
         </button>
-        <button id="micButton" class="icon-button toggle" type="button" title="关闭麦克风" aria-label="关闭麦克风" aria-pressed="true">
+        <button id="micButton" class="icon-button toggle" type="button" title="开启麦克风" aria-label="开启麦克风" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg>
         </button>
-        <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsMenu">
+        <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsMenu" data-i18n-title="settings">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.03.03a2 2 0 1 1-2.83 2.83l-.03-.03A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .58V20a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-.58 1.7 1.7 0 0 0-1.88.34l-.03.03a2 2 0 1 1-2.83-2.83l.03-.03A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-.58-1H4a2 2 0 1 1 0-4h.05a1.7 1.7 0 0 0 .58-1 1.7 1.7 0 0 0-.34-1.88l-.03-.03a2 2 0 1 1 2.83-2.83l.03.03A1.7 1.7 0 0 0 9 4.63c.34-.12.68-.32 1-.58V4a2 2 0 1 1 4 0v.05c.32.26.66.46 1 .58a1.7 1.7 0 0 0 1.88-.34l.03-.03a2 2 0 1 1 2.83 2.83l-.03.03A1.7 1.7 0 0 0 19.37 9c.12.34.32.68.58 1H20a2 2 0 1 1 0 4h-.05c-.26.32-.46.66-.55 1Z"></path></svg>
         </button>
       </div>
       <section id="settingsMenu" class="settings-menu" hidden>
         <div class="field">
-          录制范围
-          <div class="segmented" role="group" aria-label="录制范围">
-            <button id="recordAreaTab" type="button" data-record-area="tab">整页</button>
-            <button id="recordAreaRegion" type="button" data-record-area="region">区域</button>
+          <span data-i18n="recordArea">录制范围</span>
+          <div class="segmented" role="group" data-i18n-aria="recordArea">
+            <button id="recordAreaTab" type="button" data-record-area="tab">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+                <path d="M4 9h16"></path>
+                <circle cx="7" cy="7" r="0.7" fill="currentColor" stroke="none"></circle>
+                <circle cx="9.5" cy="7" r="0.7" fill="currentColor" stroke="none"></circle>
+                <circle cx="12" cy="7" r="0.7" fill="currentColor" stroke="none"></circle>
+              </svg>
+              <span data-i18n="fullPage">整页</span>
+            </button>
+            <button id="recordAreaRegion" type="button" data-record-area="region">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="5" width="14" height="14" rx="2" stroke-dasharray="3 2"></rect>
+              </svg>
+              <span data-i18n="region">区域</span>
+            </button>
+          </div>
+        </div>
+        <div id="aspectField" class="field" hidden>
+          <span data-i18n="aspectRatio">画面比例</span>
+          <div class="aspect-grid" role="group" data-i18n-aria="aspectRatio">
+            <button type="button" data-crop-aspect="16:9">16:9</button>
+            <button type="button" data-crop-aspect="4:3">4:3</button>
+            <button type="button" data-crop-aspect="1:1">1:1</button>
+            <button type="button" data-crop-aspect="3:4">3:4</button>
+            <button type="button" data-crop-aspect="9:16">9:16</button>
+            <button type="button" data-crop-aspect="any">Any</button>
+          </div>
+        </div>
+        <div class="field">
+          <span data-i18n="language">语言</span>
+          <div class="segmented" role="group" data-i18n-aria="language">
+            <button type="button" data-locale="zh">中文</button>
+            <button type="button" data-locale="en">English</button>
           </div>
         </div>
       </section>
     </main>
+    <script src="src/i18n.js"></script>
     <script src="src/popup.js"></script>
   </body>
 </html>

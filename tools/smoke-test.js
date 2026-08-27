@@ -40,6 +40,15 @@ async function testLoadedExtension(url) {
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("html-camera-recorder", { timeout: 8000 });
+    await page.waitForFunction(() => document.querySelector("html-camera-recorder")?.hidden === true);
+    const overlayHidden = await page.locator("html-camera-recorder").evaluate((host) => host.hidden);
+    assert(overlayHidden, "camera overlay should be hidden by default");
+
+    await showCameraOverlay(context, page.url());
+    await page.waitForFunction(() => {
+      const host = document.querySelector("html-camera-recorder");
+      return Boolean(host) && !host.hidden;
+    });
 
     const initialBox = await page.locator("html-camera-recorder").boundingBox();
     assert(initialBox && initialBox.width >= 168, "overlay should be visible with a stable width");
@@ -65,7 +74,7 @@ async function testLoadedExtension(url) {
     const radiusCount = await page.locator("html-camera-recorder .radius-input").count();
     assert(radiusCount === 0, "settings should not show a corner-radius slider");
     const squareLabel = await page.locator("html-camera-recorder [data-shape='square']").textContent();
-    assert(squareLabel.includes("方形"), "shape control should offer a rounded square option");
+    assert(squareLabel.includes("方形") || squareLabel.includes("Square"), "shape control should offer a rounded square option");
     const squareIcon = await page.locator("html-camera-recorder [data-shape='square'] svg").count();
     const circleIcon = await page.locator("html-camera-recorder [data-shape='circle'] svg").count();
     assert(squareIcon === 1 && circleIcon === 1, "shape buttons should show icons");
@@ -103,9 +112,10 @@ async function testRecordingFlow(url) {
         },
         storage: {
           local: {
-            get: (_key, callback) => callback({}),
-            set: () => undefined
-          }
+            get: () => Promise.resolve({}),
+            set: () => Promise.resolve()
+          },
+          onChanged: { addListener: () => undefined }
         }
       }
     });
@@ -224,12 +234,12 @@ async function testRecordingFlow(url) {
 
   try {
     await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ path: path.join(rootDir, "src", "i18n.js") });
     await page.addScriptTag({ path: path.join(rootDir, "src", "content.js") });
     await page.waitForSelector("html-camera-recorder", { timeout: 5000 });
-    await page.waitForFunction(() => {
-      const host = document.querySelector("html-camera-recorder");
-      return Boolean(host?.shadowRoot?.querySelector("video")?.srcObject);
-    });
+    await page.waitForFunction(() => document.querySelector("html-camera-recorder")?.hidden === true);
+    const overlayHidden = await page.locator("html-camera-recorder").evaluate((host) => host.hidden);
+    assert(overlayHidden, "camera overlay should be hidden by default");
     const cameraButtonCount = await page.locator("html-camera-recorder .camera-button").count();
     assert(cameraButtonCount === 0, "overlay should not show a camera toggle button");
 
@@ -290,10 +300,10 @@ async function testRecordingFlow(url) {
     const toastText = await page.locator("html-camera-toast").evaluate((host) => {
       return host.shadowRoot?.querySelector("div")?.textContent?.trim();
     });
-    assert(toastText === "视频已下载。", "page should show a centered download toast");
+    assert(toastText === "视频已下载。" || toastText === "Video downloaded.", "page should show a centered download toast");
 
     const downloadName = await page.evaluate(() => window.__hcrDownloaded.download);
-    assert(downloadName.startsWith("html-camera-recording-"), "recording should use the expected filename prefix");
+    assert(downloadName.startsWith("webcord-"), "recording should use the expected filename prefix");
     const resumedStopPayload = await readDownloadedRecording(page);
     assert(resumedStopPayload.includes("fake-recording-trailer"), "stop after resume should keep the media trailer");
 
@@ -337,6 +347,11 @@ async function testRecordingFlow(url) {
     assert(canceledState.ok && !canceledState.recording, "cancel should return to idle recording state");
     const canceledDownload = await page.evaluate(() => window.__hcrDownloaded);
     assert(!canceledDownload, "cancel should not download a recording");
+    await page.waitForSelector("html-camera-toast", { timeout: 3000 });
+    const canceledToast = await page.locator("html-camera-toast").evaluate((host) => {
+      return host.shadowRoot?.querySelector("div")?.textContent?.trim();
+    });
+    assert(canceledToast === "录制已取消。" || canceledToast === "Recording cancelled.", "page should show a cancel toast");
     const canceledUi = await page.locator("html-camera-recorder").evaluate((host) => {
       return {
         recording: host.hasAttribute("recording"),
@@ -355,6 +370,21 @@ async function readDownloadedRecording(page) {
     const response = await fetch(window.__hcrDownloaded.href);
     return response.text();
   });
+}
+
+async function showCameraOverlay(context, pageUrl) {
+  let worker = context.serviceWorkers()[0];
+  if (!worker) {
+    worker = await context.waitForEvent("serviceworker");
+  }
+  await worker.evaluate(async (targetUrl) => {
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((item) => item.url === targetUrl);
+    if (!tab?.id) {
+      throw new Error("test tab not found");
+    }
+    await chrome.tabs.sendMessage(tab.id, { type: "HCR_TOGGLE_OVERLAY" });
+  }, pageUrl);
 }
 
 async function dragFrom(page, x, y, dx, dy) {

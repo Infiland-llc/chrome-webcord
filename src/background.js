@@ -1,9 +1,37 @@
-const PANEL_WIDTH = 420;
-const PANEL_HEIGHT = 480;
-const panelState = {
-  windowId: null,
-  targetTabId: null
+const RECORDING_TAB_KEY = "hcr.recordingTabId";
+const sessionState = {
+  targetTabId: null,
+  recordingTabId: null
 };
+
+chrome.storage.local.remove("hcr.overlay");
+chrome.storage.local.get(RECORDING_TAB_KEY).then((stored) => {
+  const tabId = Number(stored[RECORDING_TAB_KEY]);
+  if (tabId) {
+    sessionState.recordingTabId = tabId;
+  }
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  pauseRecordingIfTabChanged(activeInfo.tabId, activeInfo.windowId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (sessionState.recordingTabId !== tabId) {
+    return;
+  }
+  rememberRecordingTab(tabId, false);
+  if (sessionState.targetTabId === tabId) {
+    sessionState.targetTabId = null;
+  }
+  chrome.runtime.sendMessage({
+    type: "HCR_RECORDING_STATE",
+    ok: true,
+    recording: false,
+    paused: false,
+    elapsedMs: 0
+  }).catch(() => undefined);
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "HCR_GET_TAB_STREAM_ID") {
@@ -11,48 +39,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "HCR_OPEN_PANEL") {
-    openPanel(message.tabId)
+  if (message?.type === "HCR_GET_RECORDING_LOCK") {
+    sendResponse({
+      ok: true,
+      tabId: sender.tab?.id,
+      recordingTabId: sessionState.recordingTabId
+    });
+    return false;
+  }
+
+  if (message?.type === "HCR_START_RECORDING") {
+    startTabRecording(message)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  if (message?.type === "HCR_TOGGLE_PANEL") {
-    togglePanel(message.tabId)
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "HCR_GET_RECORDABLE_TABS") {
-    getRecordableTabs()
-      .then((tabs) => sendResponse({ ok: true, tabs, targetTabId: panelState.targetTabId }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "HCR_SET_TARGET_TAB") {
-    panelState.targetTabId = Number(message.tabId);
-    sendResponse({ ok: true, targetTabId: panelState.targetTabId });
-    return true;
-  }
-
-  if (message?.type === "HCR_PANEL_START") {
-    startFromPanel(message)
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "HCR_PANEL_STOP") {
+  if (message?.type === "HCR_STOP_RECORDING") {
     sendToTarget({ type: "HCR_STOP_RECORDING" }, message.tabId)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  if (message?.type === "HCR_PANEL_CANCEL") {
+  if (message?.type === "HCR_CANCEL_RECORDING") {
     sendToTarget({ type: "HCR_CANCEL_RECORDING" }, message.tabId)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
@@ -67,9 +77,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "HCR_GET_OVERLAY_STATE") {
-    sendToTarget({ type: "HCR_GET_OVERLAY_STATE" }, message.tabId)
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    const tabId = Number(message.tabId) || null;
+    sendToTarget({ type: "HCR_GET_OVERLAY_STATE" }, tabId)
+      .then((result) => sendResponse(withRecordingLock(result, tabId)))
+      .catch((error) => sendResponse(withRecordingLock({ ok: false, error: error.message }, tabId)));
     return true;
   }
 
@@ -87,6 +98,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "HCR_STEP_BACK_REGION") {
+    sendToTarget({ type: "HCR_STEP_BACK_REGION" }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "HCR_SET_CROP_ASPECT") {
+    sendToTarget({ type: "HCR_SET_CROP_ASPECT", cropAspect: message.cropAspect }, message.tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === "HCR_TOGGLE_MICROPHONE") {
     sendToTarget({ type: "HCR_TOGGLE_MICROPHONE" }, message.tabId)
       .then((result) => sendResponse(result))
@@ -94,32 +119,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "HCR_PANEL_TOGGLE_OVERLAY") {
-    sendToTarget({ type: "HCR_TOGGLE_OVERLAY" }, message.tabId)
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "HCR_PANEL_TOGGLE_PROMPTER") {
-    sendToTarget({ type: "HCR_TOGGLE_PROMPTER" })
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "HCR_PANEL_RESET_OVERLAY") {
-    sendToTarget({ type: "HCR_RESET_OVERLAY" })
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
   if (message?.type === "HCR_RECORDING_STATE") {
     if (sender.tab) {
+      rememberRecordingTab(sender.tab.id, Boolean(message.recording));
       chrome.runtime.sendMessage({
         type: "HCR_RECORDING_STATE",
         ok: true,
+        tabId: sender.tab.id,
         recording: Boolean(message.recording),
         paused: Boolean(message.paused),
         elapsedMs: Number(message.elapsedMs) || 0
@@ -129,136 +135,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === "HCR_OVERLAY_STATE") {
+    if (sender.tab) {
+      chrome.runtime.sendMessage({
+        type: "HCR_OVERLAY_STATE",
+        ok: true,
+        tabId: sender.tab.id,
+        visible: Boolean(message.visible),
+        recordMicrophone: Boolean(message.recordMicrophone),
+        recordArea: message.recordArea === "region" ? "region" : "tab",
+        cropAspect: message.cropAspect
+      }).catch(() => undefined);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   return false;
 });
 
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === panelState.windowId) {
-    panelState.windowId = null;
+async function startTabRecording(message) {
+  const tabId = Number(message.tabId) || sessionState.targetTabId;
+  if (sessionState.recordingTabId && tabId && sessionState.recordingTabId !== tabId) {
+    return { ok: false, error: "recordingElsewhere" };
   }
-});
-
-async function togglePanel(tabId) {
-  if (panelState.windowId) {
-    try {
-      await chrome.windows.remove(panelState.windowId);
-      panelState.windowId = null;
-      return { ok: true, open: false };
-    } catch (_error) {
-      panelState.windowId = null;
-    }
-  }
-
-  const result = await openPanel(tabId);
-  return { ...result, open: true };
-}
-
-async function openPanel(tabId) {
-  if (tabId) {
-    panelState.targetTabId = Number(tabId);
-  }
-
-  const url = chrome.runtime.getURL("panel.html");
-  if (panelState.windowId) {
-    try {
-      await chrome.windows.update(panelState.windowId, { focused: true });
-      return { ok: true, windowId: panelState.windowId };
-    } catch (_error) {
-      panelState.windowId = null;
-    }
-  }
-
-  const windowInfo = await chrome.windows.create({
-    url,
-    type: "popup",
-    width: PANEL_WIDTH,
-    height: PANEL_HEIGHT,
-    focused: true
-  });
-  panelState.windowId = windowInfo.id;
-  return { ok: true, windowId: windowInfo.id };
-}
-
-async function getRecordableTabs() {
-  const tabs = await chrome.tabs.query({});
-  return tabs
-    .filter((tab) => tab.id && canInject(tab.url || ""))
-    .map((tab) => ({
-      id: tab.id,
-      title: tab.title || tab.url || `Tab ${tab.id}`,
-      url: tab.url || "",
-      active: tab.active
-    }));
-}
-
-async function startFromPanel(message) {
-  const mode = message.mode || "tab";
   if (message.tabId) {
-    panelState.targetTabId = Number(message.tabId);
+    sessionState.targetTabId = Number(message.tabId);
   }
-  const tabId = await getTargetTabId();
-  await ensureContentScript(tabId);
-
-  if (mode === "screen") {
-    return startDesktopCapture(tabId);
+  const result = await sendToTarget({ type: "HCR_START_RECORDING", mode: "tab" }, message.tabId);
+  if (result?.ok && result.recording) {
+    rememberRecordingTab(sessionState.targetTabId, true);
   }
-
-  const result = await sendToTarget({ type: "HCR_START_RECORDING", mode: "tab" });
-  await reopenActionPopup(tabId);
   return result;
 }
 
-async function reopenActionPopup(tabId) {
-  if (typeof chrome.action?.openPopup !== "function") {
-    return;
-  }
-  let windowId;
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    windowId = tab.windowId;
-  } catch (_error) {
-    return;
-  }
-  const open = () => chrome.action.openPopup(windowId ? { windowId } : {}).catch(() => undefined);
-  await open();
+function withRecordingLock(result, tabId) {
+  const recordingTabId = sessionState.recordingTabId;
+  const resolvedTabId = Number(tabId) || sessionState.targetTabId;
+  return {
+    ...(result || {}),
+    recordingElsewhere: Boolean(recordingTabId && resolvedTabId && recordingTabId !== resolvedTabId)
+  };
 }
 
-function startDesktopCapture(tabId) {
-  return new Promise((resolve) => {
-    chrome.tabs.get(tabId, (tab) => {
-      const error = chrome.runtime.lastError;
-      if (error || !tab) {
-        resolve({ ok: false, error: error?.message || "Target tab was not found." });
-        return;
-      }
+function rememberRecordingTab(tabId, recording) {
+  if (recording) {
+    sessionState.recordingTabId = tabId;
+    chrome.storage.local.set({ [RECORDING_TAB_KEY]: tabId }).catch(() => undefined);
+    return;
+  }
+  if (sessionState.recordingTabId === tabId) {
+    sessionState.recordingTabId = null;
+    chrome.storage.local.remove(RECORDING_TAB_KEY).catch(() => undefined);
+  }
+}
 
-      chrome.desktopCapture.chooseDesktopMedia(["screen", "window", "tab", "audio"], tab, (streamId, options) => {
-        if (!streamId) {
-          resolve({ ok: false, error: "Screen capture was cancelled." });
-          return;
-        }
-
-        chrome.tabs.sendMessage(
-          tabId,
-          {
-            type: "HCR_START_RECORDING",
-            mode: "desktop",
-            streamId,
-            canRequestAudioTrack: Boolean(options?.canRequestAudioTrack)
-          },
-          (response) => {
-            const sendError = chrome.runtime.lastError;
-            resolve(sendError ? { ok: false, error: sendError.message } : normalizeResponse(response));
-          }
-        );
-      });
-    });
-  });
+async function pauseRecordingIfTabChanged(activeTabId, windowId) {
+  const recordingTabId = sessionState.recordingTabId;
+  if (!recordingTabId || activeTabId === recordingTabId) {
+    return;
+  }
+  try {
+    const recordingTab = await chrome.tabs.get(recordingTabId);
+    if (recordingTab.windowId !== windowId) {
+      return;
+    }
+    await chrome.tabs.sendMessage(recordingTabId, { type: "HCR_PAUSE_RECORDING" });
+  } catch (_error) {
+    // The recording tab may already be gone.
+  }
 }
 
 async function sendToTarget(message, tabId) {
   if (tabId) {
-    panelState.targetTabId = Number(tabId);
+    sessionState.targetTabId = Number(tabId);
   }
   const targetTabId = await getTargetTabId();
   await ensureContentScript(targetTabId);
@@ -266,8 +216,8 @@ async function sendToTarget(message, tabId) {
 }
 
 async function getTargetTabId() {
-  if (panelState.targetTabId) {
-    return panelState.targetTabId;
+  if (sessionState.targetTabId) {
+    return sessionState.targetTabId;
   }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -275,7 +225,7 @@ async function getTargetTabId() {
     throw new Error("No recordable target tab is selected.");
   }
 
-  panelState.targetTabId = tab.id;
+  sessionState.targetTabId = tab.id;
   return tab.id;
 }
 
@@ -290,13 +240,13 @@ async function ensureContentScript(tabId) {
   } catch (_error) {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["src/content.js"]
+      files: ["src/i18n.js", "src/content.js"]
     });
   }
 }
 
 function handleGetTabStreamId(sender, sendResponse) {
-  const tabId = sender.tab?.id || panelState.targetTabId;
+  const tabId = sender.tab?.id || sessionState.targetTabId;
   if (!tabId) {
     sendResponse({ ok: false, error: "No active tab was found for recording." });
     return;

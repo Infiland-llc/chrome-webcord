@@ -6,8 +6,15 @@
 
   const STORAGE_KEY = "hcr.overlay";
   const MIN_CROP_SIZE = 40;
+  const CROP_ASPECT_VALUES = {
+    "16:9": 16 / 9,
+    "4:3": 4 / 3,
+    "1:1": 1,
+    "3:4": 3 / 4,
+    "9:16": 9 / 16
+  };
   const DEFAULT_STATE = {
-    visible: true,
+    visible: false,
     x: 24,
     y: 96,
     width: 240,
@@ -16,8 +23,9 @@
     borderWidth: 0,
     borderColor: "#ffffff",
     recordArea: "tab",
-    recordMicrophone: true,
+    recordMicrophone: false,
     cropRect: null,
+    cropAspect: "any",
     prompter: {
       visible: false,
       x: 24,
@@ -32,6 +40,13 @@
   const ICONS = {
     record: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle></svg>',
     stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>',
+    resume: '<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="8,5 19,12 8,19"></polygon></svg>',
+    cancel: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4C7.58 4 4.01 7.58 4.01 12S7.58 20 12 20c3.73 0 6.84-2.55 7.73-6h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"></path></svg>',
+    camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 10l4.5-2.5v9L15 14"></path><rect x="3" y="6" width="12" height="12" rx="2"></rect></svg>',
+    mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg>',
+    tab: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M4 9h16"></path><circle cx="7" cy="7" r="0.7" fill="currentColor" stroke="none"></circle><circle cx="9.5" cy="7" r="0.7" fill="currentColor" stroke="none"></circle><circle cx="12" cy="7" r="0.7" fill="currentColor" stroke="none"></circle></svg>',
+    region: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" stroke-dasharray="3 2"></rect></svg>',
     settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.03.03a2 2 0 1 1-2.83 2.83l-.03-.03A1.7 1.7 0 0 0 15 19.37a1.7 1.7 0 0 0-1 .58V20a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-.58 1.7 1.7 0 0 0-1.88.34l-.03.03a2 2 0 1 1-2.83-2.83l.03-.03A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-.58-1H4a2 2 0 1 1 0-4h.05a1.7 1.7 0 0 0 .58-1 1.7 1.7 0 0 0-.34-1.88l-.03-.03a2 2 0 1 1 2.83-2.83l.03.03A1.7 1.7 0 0 0 9 4.63c.34-.12.68-.32 1-.58V4a2 2 0 1 1 4 0v.05c.32.26.66.46 1 .58a1.7 1.7 0 0 0 1.88-.34l.03-.03a2 2 0 1 1 2.83 2.83l-.03.03A1.7 1.7 0 0 0 19.37 9c.12.34.32.68.58 1H20a2 2 0 1 1 0 4h-.05c-.26.32-.46.66-.55 1Z"></path></svg>',
     square: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="4"></rect></svg>',
     circle: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle></svg>'
@@ -54,6 +69,8 @@
   let prompterOpacityInput;
   let regionMaskHost;
   let regionMaskShadow;
+  let regionDockTimer = 0;
+  let regionDockSettingsOpen = false;
   let cameraStream;
   let microphoneStream;
   let displayStream;
@@ -77,20 +94,175 @@
   let discardRecording = false;
   let finishingRecording = false;
   let downloadToastTimer = 0;
+  let pageUnloading = false;
+  let ownTabId = null;
+  let recordingTabId = null;
+  const RECORDING_TAB_KEY = "hcr.recordingTabId";
+  let locale = window.HCR_I18N?.detect?.() || "en";
 
   boot();
 
   async function boot() {
-    const stored = await readStoredState();
+    locale = await loadLocale();
+    const stored = readStoredState();
     state = { ...DEFAULT_STATE, ...stored };
     state.shape = stored.shape === "circle" ? "circle" : "square";
+    state.visible = DEFAULT_STATE.visible;
+    state.recordMicrophone = DEFAULT_STATE.recordMicrophone;
+    state.recordArea = DEFAULT_STATE.recordArea;
+    state.cropRect = DEFAULT_STATE.cropRect;
+    state.cropAspect = DEFAULT_STATE.cropAspect;
     state.prompter = { ...DEFAULT_STATE.prompter, ...(stored.prompter || {}), visible: false };
     buildOverlay();
     buildPrompter();
     applyState();
     applyPrompterState();
+    applyLocale();
     bindChromeMessages();
+    bindLocaleStorage();
+    bindRecordingLock();
     syncCameraPreview();
+  }
+
+  function t(key) {
+    return window.HCR_I18N ? window.HCR_I18N.t(locale, key) : key;
+  }
+
+  async function loadLocale() {
+    if (window.HCR_I18N?.load) {
+      return window.HCR_I18N.load();
+    }
+    return window.HCR_I18N?.detect?.() || "en";
+  }
+
+  async function setLocale(next) {
+    locale = window.HCR_I18N ? window.HCR_I18N.normalize(next) : locale;
+    applyLocale();
+    if (window.HCR_I18N?.save) {
+      await window.HCR_I18N.save(locale);
+    }
+  }
+
+  function applyLocale() {
+    if (window.HCR_I18N?.apply) {
+      if (shadow) {
+        window.HCR_I18N.apply(shadow, locale);
+      }
+      if (prompterHost?.shadowRoot) {
+        window.HCR_I18N.apply(prompterHost.shadowRoot, locale);
+      }
+      if (regionMaskShadow) {
+        window.HCR_I18N.apply(regionMaskShadow, locale);
+      }
+    }
+    applyDefaultPrompterText();
+    refreshOverlayChrome();
+    if (state.cropRect) {
+      updateRegionDock(state.cropRect);
+    }
+  }
+
+  function applyDefaultPrompterText() {
+    if (!window.HCR_I18N) {
+      return;
+    }
+    const defaults = new Set([
+      window.HCR_I18N.t("zh", "prompterPlaceholder"),
+      window.HCR_I18N.t("en", "prompterPlaceholder")
+    ]);
+    if (!defaults.has(state.prompter.text)) {
+      return;
+    }
+    const next = t("prompterPlaceholder");
+    if (state.prompter.text === next) {
+      return;
+    }
+    state.prompter.text = next;
+    applyPrompterState();
+    persistState();
+  }
+
+  function refreshOverlayChrome() {
+    if (!shadow || !recordButton) {
+      return;
+    }
+    const recording = isRecorderLive();
+    const locked = isRecordingElsewhere();
+    recordButton.disabled = locked && !recording;
+    recordButton.title = locked && !recording ? t("recordingElsewhere") : (recording ? t("stopRecord") : t("startRecord"));
+    recordButton.setAttribute("aria-label", recordButton.title);
+    if (placeholder && !placeholder.hidden) {
+      const key = placeholder.getAttribute("data-i18n") || "openingCamera";
+      placeholder.textContent = t(key);
+    }
+  }
+
+  function isRecordingElsewhere() {
+    return Boolean(recordingTabId && ownTabId && recordingTabId !== ownTabId);
+  }
+
+  function bindRecordingLock() {
+    loadRecordingLock();
+    try {
+      chrome.storage?.onChanged?.addListener((changes, areaName) => {
+        if (areaName !== "local" || !changes[RECORDING_TAB_KEY]) {
+          return;
+        }
+        recordingTabId = Number(changes[RECORDING_TAB_KEY].newValue) || null;
+        applyRecordingLock();
+      });
+    } catch (_error) {
+      // storage may be unavailable in tests.
+    }
+  }
+
+  function loadRecordingLock() {
+    try {
+      chrome.runtime.sendMessage({ type: "HCR_GET_RECORDING_LOCK" }, (response) => {
+        if (chrome.runtime.lastError) {
+          applyRecordingLock();
+          return;
+        }
+        ownTabId = Number(response?.tabId) || null;
+        recordingTabId = Number(response?.recordingTabId) || null;
+        applyRecordingLock();
+      });
+    } catch (_error) {
+      applyRecordingLock();
+    }
+  }
+
+  function applyRecordingLock() {
+    refreshOverlayChrome();
+    if (state.cropRect) {
+      updateRegionDock(state.cropRect);
+    }
+  }
+
+  function bindLocaleStorage() {
+    try {
+      chrome.storage?.onChanged?.addListener((changes, areaName) => {
+        if (areaName !== "local" || !changes[window.HCR_I18N.STORAGE_KEY]) {
+          return;
+        }
+        const next = window.HCR_I18N.normalize(changes[window.HCR_I18N.STORAGE_KEY].newValue);
+        if (next === locale) {
+          return;
+        }
+        locale = next;
+        applyLocale();
+      });
+    } catch (_error) {
+      // storage may be unavailable in tests.
+    }
+  }
+
+  function bindLocaleButtons(root) {
+    root.querySelectorAll("[data-locale]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setLocale(button.dataset.locale);
+      });
+    });
   }
 
   function buildOverlay() {
@@ -106,32 +278,32 @@
     panel.innerHTML = `
       <div class="toolbar">
         <button class="icon-button record-button" type="button" title="开始录制" aria-label="开始录制">${ICONS.record}</button>
-        <button class="icon-button settings-button" type="button" title="调整蒙版" aria-label="调整蒙版">${ICONS.settings}</button>
+        <button class="icon-button settings-button" type="button" title="调整蒙版" aria-label="调整蒙版" data-i18n-title="adjustMask">${ICONS.settings}</button>
       </div>
-      <div class="preview-frame" data-shape="square" title="拖拽移动摄像头浮窗">
+      <div class="preview-frame" data-shape="square" title="拖拽移动摄像头浮窗" data-i18n-title="dragCamera">
         <video autoplay muted playsinline></video>
-        <div class="placeholder">正在开启摄像头...</div>
+        <div class="placeholder" data-i18n="openingCamera">正在开启摄像头...</div>
         <div class="record-dot" hidden></div>
         <div class="status"></div>
       </div>
       <form class="settings" hidden>
         <div class="field">
-          形状
-          <div class="segmented" role="group" aria-label="蒙版形状">
-            <button type="button" data-shape="square">${ICONS.square}<span>方形</span></button>
-            <button type="button" data-shape="circle">${ICONS.circle}<span>圆形</span></button>
+          <span data-i18n="shape">形状</span>
+          <div class="segmented" role="group" data-i18n-aria="shape">
+            <button type="button" data-shape="square">${ICONS.square}<span data-i18n="square">方形</span></button>
+            <button type="button" data-shape="circle">${ICONS.circle}<span data-i18n="circle">圆形</span></button>
           </div>
         </div>
         <label class="field">
-          边框
+          <span data-i18n="border">边框</span>
           <input class="border-width-input" type="range" min="0" max="12" step="1" value="0">
         </label>
-        <label class="field">
-          边框颜色
+        <label class="field border-color-field">
+          <span data-i18n="borderColor">边框颜色</span>
           <input class="border-color-input" type="color" value="#ffffff">
         </label>
       </form>
-      <div class="resize-handle" title="拖拽调整大小"></div>
+      <div class="resize-handle" title="拖拽调整大小" data-i18n-title="resize"></div>
     `;
 
     shadow.append(stylesheet, panel);
@@ -146,10 +318,22 @@
     borderColorInput = shadow.querySelector(".border-color-input");
     settingsPanel = shadow.querySelector(".settings");
     previewFrame = shadow.querySelector(".preview-frame");
+    const settingsButton = shadow.querySelector(".settings-button");
 
-    shadow.querySelector(".settings-button").addEventListener("click", () => {
+    settingsButton.addEventListener("click", (event) => {
+      event.stopPropagation();
       settingsPanel.hidden = !settingsPanel.hidden;
     });
+    document.addEventListener("pointerdown", (event) => {
+      if (settingsPanel.hidden) {
+        return;
+      }
+      const path = event.composedPath();
+      if (path.includes(settingsPanel) || path.includes(settingsButton)) {
+        return;
+      }
+      settingsPanel.hidden = true;
+    }, true);
     recordButton.addEventListener("click", toggleRecording);
     previewFrame.addEventListener("dblclick", () => {
       if (isRecorderLive()) {
@@ -192,19 +376,19 @@
     panel.className = "prompter";
     panel.innerHTML = `
       <div class="prompter-handle" data-prompter-drag>
-        <strong>题词板</strong>
-        <span>拖动这里移动</span>
+        <strong data-i18n="prompterTitle">题词板</strong>
+        <span data-i18n="prompterDrag">拖动这里移动</span>
       </div>
       <label class="field">
-        透明度
+        <span data-i18n="opacity">透明度</span>
         <input class="prompter-opacity" type="range" min="20" max="100" step="1" value="72">
       </label>
       <textarea class="prompter-text" spellcheck="false"></textarea>
       <div class="button-row">
-        <button class="copy-prompt" type="button">复制文本</button>
-        <button class="clear-prompt" type="button">清空</button>
+        <button class="copy-prompt" type="button" data-i18n="copyText">复制文本</button>
+        <button class="clear-prompt" type="button" data-i18n="clear">清空</button>
       </div>
-      <div class="prompter-resize" title="拖拽调整大小"></div>
+      <div class="prompter-resize" title="拖拽调整大小" data-i18n-title="prompterResize"></div>
     `;
 
     prompterShadow.append(stylesheet, panel);
@@ -396,22 +580,86 @@
     if (isRecorderLive()) {
       return {
         ok: false,
-        error: "录制中无法更改范围",
-        recordArea: state.recordArea === "region" ? "region" : "tab"
+        error: t("cannotChangeAreaWhileRecording"),
+        recordArea: state.recordArea === "region" ? "region" : "tab",
+        cropAspect: normalizeCropAspect(state.cropAspect)
       };
     }
 
     if (recordArea === "region") {
       state.recordArea = "region";
       beginRegionSelection();
-      return { ok: true, recordArea: "region" };
+      return { ok: true, recordArea: "region", cropAspect: normalizeCropAspect(state.cropAspect) };
     }
 
     state.recordArea = "tab";
     state.cropRect = null;
+    removeRegionSelectionLayer();
     applyState();
     persistState();
-    return { ok: true, recordArea: "tab" };
+    return { ok: true, recordArea: "tab", cropAspect: normalizeCropAspect(state.cropAspect) };
+  }
+
+  function removeRegionSelectionLayer() {
+    document.querySelector("[data-hcr-region-select]")?.remove();
+  }
+
+  function isRegionSelecting() {
+    return Boolean(document.querySelector("[data-hcr-region-select]"));
+  }
+
+  function hasCropRect() {
+    return Boolean(state.cropRect && state.cropRect.width > 0 && state.cropRect.height > 0);
+  }
+
+  function stepBackRegionSelection() {
+    if (isRecorderLive() || state.recordArea !== "region") {
+      return {
+        ok: true,
+        recordArea: state.recordArea === "region" ? "region" : "tab",
+        cropAspect: normalizeCropAspect(state.cropAspect)
+      };
+    }
+
+    if (hasCropRect() && !isRegionSelecting()) {
+      state.cropRect = null;
+      applyState();
+      persistState();
+      beginRegionSelection();
+      return {
+        ok: true,
+        recordArea: "region",
+        cropAspect: normalizeCropAspect(state.cropAspect)
+      };
+    }
+
+    const result = setRecordArea("tab");
+    setStatus(t("regionCancelled"));
+    return result;
+  }
+
+  function setCropAspect(cropAspect) {
+    if (isRecorderLive()) {
+      return {
+        ok: false,
+        error: t("cannotChangeAspectWhileRecording"),
+        recordArea: state.recordArea === "region" ? "region" : "tab",
+        cropAspect: normalizeCropAspect(state.cropAspect)
+      };
+    }
+
+    state.cropAspect = normalizeCropAspect(cropAspect);
+    const ratio = getCropAspectRatio();
+    if (state.cropRect && ratio) {
+      state.cropRect = snapCropRectToAspect(state.cropRect, ratio);
+    }
+    applyState();
+    persistState();
+    return {
+      ok: true,
+      recordArea: state.recordArea === "region" ? "region" : "tab",
+      cropAspect: state.cropAspect
+    };
   }
 
   function beginRegionSelection() {
@@ -419,6 +667,7 @@
       return;
     }
 
+    removeRegionSelectionLayer();
     if (regionMaskHost) {
       regionMaskHost.hidden = true;
     }
@@ -443,9 +692,12 @@
       "pointer-events:none"
     ].join(";");
 
+    layer.setAttribute("data-hcr-region-select", "");
+    layer.tabIndex = -1;
     layer.appendChild(box);
     document.documentElement.appendChild(layer);
-    setStatus("拖拽选择录制区域");
+    layer.focus({ preventScroll: true });
+    setStatus(t("dragRegion"));
 
     layer.addEventListener("pointerdown", (event) => {
       start = { x: event.clientX, y: event.clientY };
@@ -472,28 +724,14 @@
       if (rect.width < MIN_CROP_SIZE || rect.height < MIN_CROP_SIZE) {
         state.recordArea = "tab";
         state.cropRect = null;
-        setStatus("区域太小，已恢复整页录制");
+        setStatus(t("regionTooSmall"));
       } else {
         state.cropRect = rect;
-        setStatus("已选择录制区域");
+        setStatus(t("regionSelected"));
       }
       applyState();
       persistState();
     });
-
-    window.addEventListener("keydown", cancelSelection, { once: true });
-
-    function cancelSelection(event) {
-      if (event.key !== "Escape" || !layer.isConnected) {
-        return;
-      }
-      layer.remove();
-      state.recordArea = "tab";
-      state.cropRect = null;
-      applyState();
-      persistState();
-      setStatus("已取消区域选择");
-    }
   }
 
   function drawSelectionBox(box, x1, y1, x2, y2) {
@@ -506,15 +744,115 @@
   }
 
   function normalizeRect(x1, y1, x2, y2) {
-    const left = clamp(Math.min(x1, x2), 0, window.innerWidth);
-    const top = clamp(Math.min(y1, y2), 0, window.innerHeight);
-    const right = clamp(Math.max(x1, x2), 0, window.innerWidth);
-    const bottom = clamp(Math.max(y1, y2), 0, window.innerHeight);
+    const ratio = getCropAspectRatio();
+    if (!ratio) {
+      const left = clamp(Math.min(x1, x2), 0, window.innerWidth);
+      const top = clamp(Math.min(y1, y2), 0, window.innerHeight);
+      const right = clamp(Math.max(x1, x2), 0, window.innerWidth);
+      const bottom = clamp(Math.max(y1, y2), 0, window.innerHeight);
+      return {
+        x: Math.round(left),
+        y: Math.round(top),
+        width: Math.round(right - left),
+        height: Math.round(bottom - top)
+      };
+    }
+
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+    let nextWidth = width;
+    let nextHeight = height;
+    if (width >= height * ratio) {
+      nextWidth = height * ratio;
+      nextHeight = height;
+    } else {
+      nextWidth = width;
+      nextHeight = width / ratio;
+    }
+
+    let x = x2 >= x1 ? x1 : x1 - nextWidth;
+    let y = y2 >= y1 ? y1 : y1 - nextHeight;
+    const maxWidth = x2 >= x1 ? window.innerWidth - x1 : x1;
+    const maxHeight = y2 >= y1 ? window.innerHeight - y1 : y1;
+    if (nextWidth > maxWidth) {
+      nextWidth = Math.max(0, maxWidth);
+      nextHeight = nextWidth / ratio;
+    }
+    if (nextHeight > maxHeight) {
+      nextHeight = Math.max(0, maxHeight);
+      nextWidth = nextHeight * ratio;
+    }
+    x = x2 >= x1 ? x1 : x1 - nextWidth;
+    y = y2 >= y1 ? y1 : y1 - nextHeight;
     return {
-      x: Math.round(left),
-      y: Math.round(top),
-      width: Math.round(right - left),
-      height: Math.round(bottom - top)
+      x: Math.round(clamp(x, 0, window.innerWidth)),
+      y: Math.round(clamp(y, 0, window.innerHeight)),
+      width: Math.round(nextWidth),
+      height: Math.round(nextHeight)
+    };
+  }
+
+  function normalizeCropAspect(value) {
+    return CROP_ASPECT_VALUES[value] ? value : "any";
+  }
+
+  function getCropAspectRatio() {
+    return CROP_ASPECT_VALUES[state.cropAspect] || 0;
+  }
+
+  function minAspectSize(ratio) {
+    const minWidth = Math.max(MIN_CROP_SIZE, MIN_CROP_SIZE * ratio);
+    return { minWidth, minHeight: minWidth / ratio };
+  }
+
+  function placeAspectRect(x, y, width, height, ratio) {
+    const { minWidth } = minAspectSize(ratio);
+    let nextWidth = Math.max(width, minWidth);
+    let nextHeight = nextWidth / ratio;
+    if (nextWidth > window.innerWidth) {
+      nextWidth = window.innerWidth;
+      nextHeight = nextWidth / ratio;
+    }
+    if (nextHeight > window.innerHeight) {
+      nextHeight = window.innerHeight;
+      nextWidth = nextHeight * ratio;
+    }
+    return {
+      x: Math.round(clamp(x, 0, Math.max(0, window.innerWidth - nextWidth))),
+      y: Math.round(clamp(y, 0, Math.max(0, window.innerHeight - nextHeight))),
+      width: Math.round(nextWidth),
+      height: Math.round(nextHeight)
+    };
+  }
+
+  function snapCropRectToAspect(rect, ratio) {
+    const { minWidth, minHeight } = minAspectSize(ratio);
+    let height = Math.max(rect.height, minHeight);
+    let width = height * ratio;
+
+    if (width < minWidth) {
+      width = minWidth;
+      height = width / ratio;
+    }
+    if (width > window.innerWidth) {
+      width = window.innerWidth;
+      height = width / ratio;
+    }
+    if (height > window.innerHeight) {
+      height = window.innerHeight;
+      width = height * ratio;
+      if (width > window.innerWidth) {
+        width = window.innerWidth;
+        height = width / ratio;
+      }
+    }
+
+    const centerX = rect.x + rect.width / 2;
+    return {
+      x: Math.round(clamp(centerX - width / 2, 0, Math.max(0, window.innerWidth - width))),
+      y: Math.round(clamp(rect.y, 0, Math.max(0, window.innerHeight - height))),
+      width: Math.round(width),
+      height: Math.round(height)
     };
   }
 
@@ -571,10 +909,51 @@
         <div class="region-handle" data-action="resize" data-edge="w"></div>
         <div class="region-size"></div>
       </div>
+      <div class="region-dock" hidden>
+        <div class="region-dock-bar">
+          <button class="region-dock-button region-dock-record" type="button" title="录制" aria-label="录制">${ICONS.record}</button>
+          <span class="region-dock-timer" hidden>00:00</span>
+          <button class="region-dock-button region-dock-pause" type="button" title="暂停" aria-label="暂停" hidden>${ICONS.pause}</button>
+          <button class="region-dock-button region-dock-cancel" type="button" title="取消录制" aria-label="取消录制" hidden data-i18n-title="cancelRecord">${ICONS.cancel}</button>
+          <button class="region-dock-button region-dock-toggle region-dock-camera" type="button" title="显示摄像头" aria-label="显示摄像头" aria-pressed="false">${ICONS.camera}</button>
+          <button class="region-dock-button region-dock-toggle region-dock-mic" type="button" title="开启麦克风" aria-label="开启麦克风" aria-pressed="false">${ICONS.mic}</button>
+          <button class="region-dock-button region-dock-settings" type="button" title="设置" aria-label="设置" aria-expanded="false" data-i18n-title="settings">${ICONS.settings}</button>
+        </div>
+        <section class="region-dock-menu" hidden>
+          <div class="region-dock-field">
+            <span data-i18n="recordArea">录制范围</span>
+            <div class="region-dock-segmented" role="group" data-i18n-aria="recordArea">
+              <button type="button" data-record-area="tab">${ICONS.tab}<span data-i18n="fullPage">整页</span></button>
+              <button type="button" data-record-area="region">${ICONS.region}<span data-i18n="region">区域</span></button>
+            </div>
+          </div>
+          <div class="region-dock-field region-dock-aspect-field">
+            <span data-i18n="aspectRatio">画面比例</span>
+            <div class="region-dock-aspect" role="group" data-i18n-aria="aspectRatio">
+              <button type="button" data-crop-aspect="16:9">16:9</button>
+              <button type="button" data-crop-aspect="4:3">4:3</button>
+              <button type="button" data-crop-aspect="1:1">1:1</button>
+              <button type="button" data-crop-aspect="3:4">3:4</button>
+              <button type="button" data-crop-aspect="9:16">9:16</button>
+              <button type="button" data-crop-aspect="any">Any</button>
+            </div>
+          </div>
+          <div class="region-dock-field">
+            <span data-i18n="language">语言</span>
+            <div class="region-dock-segmented" role="group" data-i18n-aria="language">
+              <button type="button" data-locale="zh">中文</button>
+              <button type="button" data-locale="en">English</button>
+            </div>
+          </div>
+        </section>
+      </div>
     `;
 
     regionMaskShadow.append(stylesheet, root);
     bindRegionMaskPointer(root);
+    bindRegionDock(root);
+    bindLocaleButtons(root);
+    window.HCR_I18N?.apply?.(regionMaskShadow, locale);
     document.documentElement.appendChild(regionMaskHost);
   }
 
@@ -600,6 +979,217 @@
     const sizeEl = regionMaskShadow.querySelector(".region-size");
     sizeEl.textContent = `${rect.width} × ${rect.height}`;
     sizeEl.dataset.placement = rect.y < 32 ? "below" : "above";
+    updateRegionDock(rect);
+  }
+
+  function bindRegionDock(root) {
+    const dock = root.querySelector(".region-dock");
+    const recordEl = dock.querySelector(".region-dock-record");
+    const pauseEl = dock.querySelector(".region-dock-pause");
+    const cancelEl = dock.querySelector(".region-dock-cancel");
+    const cameraEl = dock.querySelector(".region-dock-camera");
+    const micEl = dock.querySelector(".region-dock-mic");
+    const settingsEl = dock.querySelector(".region-dock-settings");
+
+    dock.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+
+    recordEl.addEventListener("click", async () => {
+      if (recordEl.disabled || isRecordingElsewhere()) {
+        return;
+      }
+      recordEl.disabled = true;
+      try {
+        if (isRecorderLive()) {
+          stopRecording();
+        } else {
+          await startRecording({ mode: "tab" });
+        }
+      } catch (_error) {
+        // startRecording already surfaces status text.
+      } finally {
+        updateRegionDock(state.cropRect);
+      }
+    });
+
+    pauseEl.addEventListener("click", async () => {
+      if (pauseEl.disabled || !isRecorderLive()) {
+        return;
+      }
+      await togglePauseRecording();
+      updateRegionDock(state.cropRect);
+    });
+
+    cancelEl.addEventListener("click", async () => {
+      if (cancelEl.disabled || !isRecorderLive()) {
+        return;
+      }
+      await cancelRecording();
+      updateRegionDock(state.cropRect);
+    });
+
+    cameraEl.addEventListener("click", () => {
+      if (cameraEl.disabled) {
+        return;
+      }
+      state.visible = !state.visible;
+      applyState();
+      persistState();
+      syncCameraPreview();
+      updateRegionDock(state.cropRect);
+    });
+
+    micEl.addEventListener("click", async () => {
+      if (micEl.disabled) {
+        return;
+      }
+      micEl.disabled = true;
+      try {
+        await toggleMicrophone();
+      } catch (_error) {
+        // toggleMicrophone already surfaces status text.
+      } finally {
+        updateRegionDock(state.cropRect);
+      }
+    });
+
+    settingsEl.addEventListener("click", () => {
+      if (settingsEl.disabled) {
+        return;
+      }
+      regionDockSettingsOpen = !regionDockSettingsOpen;
+      updateRegionDock(state.cropRect);
+    });
+
+    dock.querySelectorAll("[data-record-area]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.disabled) {
+          return;
+        }
+        setRecordArea(button.dataset.recordArea === "region" ? "region" : "tab");
+      });
+    });
+
+    dock.querySelectorAll("[data-crop-aspect]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.disabled) {
+          return;
+        }
+        setCropAspect(button.dataset.cropAspect);
+      });
+    });
+  }
+
+  function updateRegionDock(rect) {
+    if (!regionMaskShadow) {
+      return;
+    }
+    const dock = regionMaskShadow.querySelector(".region-dock");
+    if (!dock) {
+      return;
+    }
+
+    const visible = Boolean(rect && rect.width > 0 && rect.height > 0 && !isRegionSelecting());
+    dock.hidden = !visible;
+    if (!visible) {
+      regionDockSettingsOpen = false;
+      window.clearInterval(regionDockTimer);
+      return;
+    }
+
+    const recording = isRecorderLive();
+    const paused = recordingPaused || mediaRecorder?.state === "paused";
+    const recordEl = dock.querySelector(".region-dock-record");
+    const timerEl = dock.querySelector(".region-dock-timer");
+    const pauseEl = dock.querySelector(".region-dock-pause");
+    const cancelEl = dock.querySelector(".region-dock-cancel");
+    const cameraEl = dock.querySelector(".region-dock-camera");
+    const micEl = dock.querySelector(".region-dock-mic");
+    const settingsEl = dock.querySelector(".region-dock-settings");
+    const menuEl = dock.querySelector(".region-dock-menu");
+    const aspectField = dock.querySelector(".region-dock-aspect-field");
+
+    recordEl.disabled = isRecordingElsewhere() && !recording;
+    recordEl.dataset.recording = String(recording);
+    recordEl.innerHTML = recording ? ICONS.stop : ICONS.record;
+    recordEl.title = recordEl.disabled ? t("recordingElsewhere") : (recording ? t("stopRecord") : t("record"));
+    recordEl.setAttribute("aria-label", recordEl.title);
+    timerEl.hidden = !recording;
+    pauseEl.hidden = !recording;
+    cancelEl.hidden = !recording;
+    pauseEl.innerHTML = paused ? ICONS.resume : ICONS.pause;
+    pauseEl.title = paused ? t("resume") : t("pause");
+    pauseEl.setAttribute("aria-label", paused ? t("resume") : t("pause"));
+    renderRegionDockTimer();
+
+    window.clearInterval(regionDockTimer);
+    if (recording && !paused) {
+      regionDockTimer = window.setInterval(renderRegionDockTimer, 250);
+    }
+
+    setDockToggle(cameraEl, state.visible, t("hideCamera"), t("showCamera"));
+    setDockToggle(micEl, Boolean(state.recordMicrophone), t("muteMic"), t("unmuteMic"));
+    cameraEl.disabled = recording;
+    micEl.disabled = recording;
+    settingsEl.disabled = recording;
+    settingsEl.setAttribute("aria-expanded", String(regionDockSettingsOpen));
+    menuEl.hidden = !regionDockSettingsOpen;
+
+    const selectedArea = state.recordArea === "region" ? "region" : "tab";
+    dock.querySelectorAll("[data-record-area]").forEach((button) => {
+      button.disabled = recording;
+      button.setAttribute("aria-pressed", String(button.dataset.recordArea === selectedArea));
+    });
+
+    aspectField.hidden = selectedArea !== "region";
+    const selectedAspect = normalizeCropAspect(state.cropAspect);
+    dock.querySelectorAll("[data-crop-aspect]").forEach((button) => {
+      button.disabled = recording;
+      button.setAttribute("aria-pressed", String(button.dataset.cropAspect === selectedAspect));
+    });
+
+    positionRegionDock(rect, dock);
+  }
+
+  function setDockToggle(button, pressed, onLabel, offLabel) {
+    button.setAttribute("aria-pressed", String(pressed));
+    const label = pressed ? onLabel : offLabel;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
+  function positionRegionDock(rect, dock) {
+    const gap = 8;
+    const width = dock.offsetWidth;
+    const height = dock.offsetHeight;
+    const spaceBelow = window.innerHeight - (rect.y + rect.height);
+    const placeRight = spaceBelow < height + gap + 8;
+    let left;
+    let top;
+
+    if (placeRight) {
+      left = rect.x + rect.width + gap;
+      top = rect.y + rect.height / 2 - height / 2;
+    } else {
+      const sizeBelow = rect.y < 32 ? 28 : 0;
+      left = rect.x + rect.width / 2 - width / 2;
+      top = rect.y + rect.height + gap + sizeBelow;
+    }
+
+    dock.style.left = `${Math.round(clamp(left, gap, Math.max(gap, window.innerWidth - width - gap)))}px`;
+    dock.style.top = `${Math.round(clamp(top, gap, Math.max(gap, window.innerHeight - height - gap)))}px`;
+  }
+
+  function renderRegionDockTimer() {
+    const timerEl = regionMaskShadow?.querySelector(".region-dock-timer");
+    if (!timerEl) {
+      return;
+    }
+    const totalSeconds = Math.max(0, Math.floor(getRecordingElapsedMs() / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    timerEl.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
   function bindRegionMaskPointer(root) {
@@ -661,6 +1251,11 @@
   }
 
   function resizeCropRect(start, edge, dx, dy) {
+    const ratio = getCropAspectRatio();
+    if (ratio) {
+      return resizeCropRectLocked(start, edge, dx, dy, ratio);
+    }
+
     let x = start.x;
     let y = start.y;
     let width = start.width;
@@ -691,8 +1286,90 @@
     };
   }
 
+  function resizeCropRectLocked(start, edge, dx, dy, ratio) {
+    const { minWidth } = minAspectSize(ratio);
+    const right = start.x + start.width;
+    const bottom = start.y + start.height;
+    const centerX = start.x + start.width / 2;
+    const centerY = start.y + start.height / 2;
+    let width = start.width;
+    let height = start.height;
+
+    if (edge === "e" || edge === "w") {
+      width = edge === "e" ? start.width + dx : start.width - dx;
+      height = width / ratio;
+    } else if (edge === "n" || edge === "s") {
+      height = edge === "s" ? start.height + dy : start.height - dy;
+      width = height * ratio;
+    } else {
+      const rawWidth = edge.includes("e") ? start.width + dx : start.width - dx;
+      const rawHeight = edge.includes("s") ? start.height + dy : start.height - dy;
+      if (Math.abs(rawWidth / ratio) >= Math.abs(rawHeight)) {
+        width = rawWidth;
+        height = rawWidth / ratio;
+      } else {
+        height = rawHeight;
+        width = rawHeight * ratio;
+      }
+    }
+
+    if (width < minWidth) {
+      width = minWidth;
+      height = width / ratio;
+    }
+
+    let x = edge.includes("w") ? right - width : edge === "n" || edge === "s" ? centerX - width / 2 : start.x;
+    let y = edge.includes("n") ? bottom - height : edge === "e" || edge === "w" ? centerY - height / 2 : start.y;
+
+    if (x < 0) {
+      width += x;
+      height = width / ratio;
+      x = 0;
+      if (edge.includes("w")) {
+        x = right - width;
+      } else if (edge === "n" || edge === "s") {
+        x = centerX - width / 2;
+      }
+    }
+    if (y < 0) {
+      height += y;
+      width = height * ratio;
+      y = 0;
+      if (edge.includes("n")) {
+        y = bottom - height;
+      } else if (edge === "e" || edge === "w") {
+        y = centerY - height / 2;
+      }
+    }
+    if (x + width > window.innerWidth) {
+      width = window.innerWidth - Math.max(0, x);
+      height = width / ratio;
+      if (edge.includes("w")) {
+        x = right - width;
+      } else if (edge === "n" || edge === "s") {
+        x = centerX - width / 2;
+      }
+    }
+    if (y + height > window.innerHeight) {
+      height = window.innerHeight - Math.max(0, y);
+      width = height * ratio;
+      if (edge.includes("n")) {
+        y = bottom - height;
+      } else if (edge === "e" || edge === "w") {
+        y = centerY - height / 2;
+      }
+    }
+
+    return placeAspectRect(x, y, width, height, ratio);
+  }
+
   function constrainCropRect() {
     if (!state.cropRect) {
+      return;
+    }
+    const ratio = getCropAspectRatio();
+    if (ratio) {
+      state.cropRect = snapCropRectToAspect(state.cropRect, ratio);
       return;
     }
     const min = Math.min(MIN_CROP_SIZE, window.innerWidth, window.innerHeight);
@@ -720,7 +1397,8 @@
       return;
     }
 
-    placeholder.textContent = "正在开启摄像头...";
+    placeholder.setAttribute("data-i18n", "openingCamera");
+    placeholder.textContent = t("openingCamera");
     placeholder.hidden = false;
     try {
       cameraStream = await navigator.mediaDevices.getUserMedia({
@@ -733,8 +1411,9 @@
       video.srcObject = cameraStream;
       placeholder.hidden = true;
     } catch (error) {
-      placeholder.textContent = "摄像头权限被拒绝或不可用";
-      setStatus("摄像头权限被拒绝或不可用");
+      placeholder.setAttribute("data-i18n", "cameraDenied");
+      placeholder.textContent = t("cameraDenied");
+      setStatus(t("cameraDenied"));
       throw error;
     }
   }
@@ -746,7 +1425,8 @@
     cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
     video.srcObject = null;
-    placeholder.textContent = "正在开启摄像头...";
+    placeholder.setAttribute("data-i18n", "openingCamera");
+    placeholder.textContent = t("openingCamera");
     placeholder.hidden = false;
   }
 
@@ -755,11 +1435,17 @@
       stopRecording();
       return;
     }
+    if (isRecordingElsewhere()) {
+      return;
+    }
 
     await startRecording({ mode: "tab" });
   }
 
   async function startRecording(options = {}) {
+    if (isRecordingElsewhere()) {
+      throw new Error(t("recordingElsewhere"));
+    }
     try {
       if (!cameraStream) {
         await startCamera();
@@ -794,21 +1480,27 @@
         }
       });
       mediaRecorder.addEventListener("stop", saveRecording, { once: true });
-      displayStream.getVideoTracks()[0]?.addEventListener("ended", stopRecording, { once: true });
+      displayStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        if (pageUnloading) {
+          cancelRecording();
+          return;
+        }
+        stopRecording();
+      }, { once: true });
 
       mediaRecorder.start(1000);
       startRecordingClock();
       recordButton.dataset.recording = "true";
-      recordButton.title = "停止录制";
-      recordButton.setAttribute("aria-label", "停止录制");
+      recordButton.title = t("stopRecord");
+      recordButton.setAttribute("aria-label", t("stopRecord"));
       recordButton.innerHTML = ICONS.stop;
       recordDot.hidden = false;
       notifyRecordingState();
     } catch (error) {
       setRecordingUi(false);
       cleanupRecordingStreams();
-      const message = error.message || "无法开始录制";
-      setStatus(message.includes("Extension has not been invoked") ? "请先点扩展图标里的“开始录制当前页”" : (error.name === "NotAllowedError" ? "录制权限被取消" : message));
+      const message = error.message || t("cannotStartRecording");
+      setStatus(message.includes("Extension has not been invoked") ? t("invokeExtension") : (error.name === "NotAllowedError" ? t("recordingPermissionDenied") : message));
       notifyRecordingState();
       throw error;
     }
@@ -847,7 +1539,7 @@
 
   async function captureDesktopStream(streamId) {
     if (!streamId) {
-      throw new Error("没有可用的屏幕录制来源。");
+      throw new Error(t("noCaptureSource"));
     }
 
     return captureWithFallback([
@@ -877,7 +1569,7 @@
         lastError = error;
       }
     }
-    throw lastError || new Error("无法捕获当前标签页");
+    throw lastError || new Error(t("cannotCaptureTab"));
   }
 
   function getPreferredCaptureSize() {
@@ -897,7 +1589,7 @@
           return;
         }
         if (!response?.ok || !response.streamId) {
-          reject(new Error(response?.error || "无法捕获当前标签页"));
+          reject(new Error(response?.error || t("cannotCaptureTab")));
           return;
         }
         resolve(response.streamId);
@@ -936,7 +1628,7 @@
   async function createCroppedVideoStream(tabStream, rect) {
     const sourceTrack = tabStream.getVideoTracks()[0];
     if (!sourceTrack) {
-      throw new Error("无法创建区域录制画面");
+      throw new Error(t("cannotCreateRegionFrame"));
     }
     preferDetailVideoTracks(tabStream);
     return cropTabStreamWithCanvas(sourceTrack, rect);
@@ -983,7 +1675,7 @@
       const context = canvas.getContext("2d", { alpha: false, desynchronized: true }) || canvas.getContext("2d");
 
       if (!context) {
-        reject(new Error("无法创建区域录制画面"));
+        reject(new Error(t("cannotCreateRegionFrame")));
         return;
       }
 
@@ -1005,7 +1697,7 @@
           const frameW = tabVideo.videoWidth || settings.width;
           const frameH = tabVideo.videoHeight || settings.height;
           if (!frameW || !frameH) {
-            reject(new Error("无法创建区域录制画面"));
+            reject(new Error(t("cannotCreateRegionFrame")));
             return;
           }
 
@@ -1142,17 +1834,17 @@
   }
 
   async function toggleMicrophone() {
-    const previous = state.recordMicrophone !== false;
+    const previous = Boolean(state.recordMicrophone);
     state.recordMicrophone = !previous;
     try {
       await applyMicrophoneSetting();
       persistState();
     } catch (error) {
       state.recordMicrophone = previous;
-      setStatus("麦克风权限被拒绝或不可用");
+      setStatus(t("micDenied"));
       throw error;
     }
-    setStatus(state.recordMicrophone ? "将录制麦克风" : "不录制麦克风");
+    setStatus(state.recordMicrophone ? t("willRecordMic") : t("willNotRecordMic"));
     return state.recordMicrophone;
   }
 
@@ -1192,7 +1884,7 @@
   }
 
   function finalizeRecorder(discard) {
-    discardRecording = Boolean(discard);
+    discardRecording = Boolean(discard) || pageUnloading;
     if (!mediaRecorder || mediaRecorder.state === "inactive") {
       saveRecording();
       return Promise.resolve(getRecordingState());
@@ -1234,6 +1926,15 @@
     } else {
       pauseRecording();
     }
+    notifyRecordingState();
+    return getRecordingState();
+  }
+
+  function pauseRecordingIfNeeded() {
+    if (!isRecorderLive() || recordingPaused || mediaRecorder?.state === "paused") {
+      return getRecordingState();
+    }
+    pauseRecording();
     notifyRecordingState();
     return getRecordingState();
   }
@@ -1351,17 +2052,21 @@
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `html-camera-recording-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
+        link.download = `webcord-${Math.floor(Date.now() / 1000)}.${extension}`;
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 30000);
-        showDownloadToast("视频已下载。");
-      } else if (!discarded) {
-        setStatus("没有录到可保存的数据");
+        showDownloadToast(t("videoDownloaded"));
+      } else if (discarded) {
+        if (!pageUnloading) {
+          showDownloadToast(t("recordingCancelled"));
+        }
+      } else {
+        setStatus(t("noRecordingData"));
       }
 
       recordButton.dataset.recording = "false";
-      recordButton.title = "开始录制";
-      recordButton.setAttribute("aria-label", "开始录制");
+      recordButton.title = t("startRecord");
+      recordButton.setAttribute("aria-label", t("startRecord"));
       recordButton.innerHTML = ICONS.record;
       recordDot.hidden = true;
       setRecordingUi(false);
@@ -1384,6 +2089,7 @@
     } catch (_error) {
       // The popup may already be gone.
     }
+    updateRegionDock(state.cropRect);
   }
 
   function showDownloadToast(message) {
@@ -1525,6 +2231,10 @@
     previewFrame.dataset.shape = state.shape;
     borderWidthInput.value = String(state.borderWidth);
     borderColorInput.value = state.borderColor;
+    const borderColorField = shadow.querySelector(".border-color-field");
+    if (borderColorField) {
+      borderColorField.hidden = Number(state.borderWidth) <= 0;
+    }
     shadow.querySelectorAll("[data-shape]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.shape === state.shape));
     });
@@ -1585,15 +2295,42 @@
   }
 
   function readStoredState() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(STORAGE_KEY, (result) => {
-        resolve(result[STORAGE_KEY] || {});
-      });
-    });
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
   }
 
   function persistState() {
-    chrome.storage.local.set({ [STORAGE_KEY]: state });
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_error) {
+      // sessionStorage can be unavailable on some pages.
+    }
+    notifyOverlayState();
+  }
+
+  function notifyOverlayState() {
+    try {
+      chrome.runtime.sendMessage({
+        type: "HCR_OVERLAY_STATE",
+        ok: true,
+        visible: state.visible,
+        recordMicrophone: Boolean(state.recordMicrophone),
+        recordArea: state.recordArea === "region" ? "region" : "tab",
+        cropAspect: normalizeCropAspect(state.cropAspect)
+      }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (_error) {
+      // The popup may already be gone.
+    }
   }
 
   function bindChromeMessages() {
@@ -1607,8 +2344,9 @@
         sendResponse({
           ok: true,
           visible: state.visible,
-          recordMicrophone: state.recordMicrophone !== false,
+          recordMicrophone: Boolean(state.recordMicrophone),
           recordArea: state.recordArea === "region" ? "region" : "tab",
+          cropAspect: normalizeCropAspect(state.cropAspect),
           ...getRecordingState()
         });
         return true;
@@ -1616,6 +2354,16 @@
 
       if (message?.type === "HCR_SET_RECORD_AREA") {
         sendResponse(setRecordArea(message.recordArea));
+        return true;
+      }
+
+      if (message?.type === "HCR_STEP_BACK_REGION") {
+        sendResponse(stepBackRegionSelection());
+        return true;
+      }
+
+      if (message?.type === "HCR_SET_CROP_ASPECT") {
+        sendResponse(setCropAspect(message.cropAspect));
         return true;
       }
 
@@ -1637,7 +2385,7 @@
 
       if (message?.type === "HCR_RESET_OVERLAY") {
         const prompter = { ...state.prompter };
-        state = { ...DEFAULT_STATE, visible: true, prompter };
+        state = { ...DEFAULT_STATE, prompter };
         applyState();
         applyPrompterState();
         persistState();
@@ -1668,6 +2416,11 @@
         return true;
       }
 
+      if (message?.type === "HCR_PAUSE_RECORDING") {
+        sendResponse({ ok: true, ...pauseRecordingIfNeeded() });
+        return true;
+      }
+
       if (message?.type === "HCR_STOP_RECORDING") {
         stopRecording();
         sendResponse({ ok: true, ...getRecordingState() });
@@ -1685,6 +2438,14 @@
     });
   }
 
+  window.addEventListener("pagehide", () => {
+    pageUnloading = true;
+    if (!isRecorderLive() && !host?.hasAttribute("recording")) {
+      return;
+    }
+    cancelRecording();
+  });
+
   window.addEventListener("resize", () => {
     constrainToViewport();
     constrainPrompterToViewport();
@@ -1693,6 +2454,27 @@
     applyPrompterState();
     persistState();
   });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || isRecorderLive() || state.recordArea !== "region") {
+      return;
+    }
+    if (isTypingTarget(event)) {
+      return;
+    }
+    event.preventDefault();
+    stepBackRegionSelection();
+  }, true);
+
+  function isTypingTarget(event) {
+    return event.composedPath().some((node) => {
+      if (!(node instanceof Element)) {
+        return false;
+      }
+      const tag = node.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable;
+    });
+  }
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);

@@ -13,7 +13,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  min-width: 220px;
+  width: max-content;
 }
 
 .popup-bar {
@@ -53,8 +53,13 @@ body {
   pointer-events: none;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: #edf2f7;
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .icon-button svg {
@@ -130,6 +135,8 @@ body {
 }
 
 .settings-menu {
+  display: grid;
+  gap: 10px;
   padding: 8px 8px 10px;
   border-top: 1px solid #dbe2ea;
 }
@@ -145,21 +152,38 @@ body {
   font: 650 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
+.field[hidden] {
+  display: none;
+}
+
 .segmented {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
   gap: 4px;
 }
 
 .segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 10px;
   border: 1px solid #cfd6df;
   border-radius: 6px;
   color: #334155;
   background: #ffffff;
   font: 650 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
   cursor: pointer;
+}
+
+.segmented button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .segmented button:hover {
@@ -177,6 +201,41 @@ body {
   cursor: default;
 }
 
+.aspect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.aspect-grid button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #cfd6df;
+  border-radius: 6px;
+  color: #334155;
+  background: #ffffff;
+  font: 650 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.aspect-grid button:hover {
+  background: #edf2f7;
+}
+
+.aspect-grid button[aria-pressed="true"] {
+  color: #ffffff;
+  border-color: #2563eb;
+  background: #2563eb;
+}
+
+.aspect-grid button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     color: #e5e7eb;
@@ -189,7 +248,7 @@ body {
     background: #1f2937;
   }
 
-  .icon-button:hover {
+  .icon-button:hover:not(:disabled) {
     background: #273449;
   }
 
@@ -244,6 +303,22 @@ body {
   }
 
   .segmented button[aria-pressed="true"] {
+    color: #ffffff;
+    border-color: #2563eb;
+    background: #2563eb;
+  }
+
+  .aspect-grid button {
+    border-color: #374151;
+    color: #e5e7eb;
+    background: #1f2937;
+  }
+
+  .aspect-grid button:hover {
+    background: #273449;
+  }
+
+  .aspect-grid button[aria-pressed="true"] {
     color: #ffffff;
     border-color: #2563eb;
     background: #2563eb;

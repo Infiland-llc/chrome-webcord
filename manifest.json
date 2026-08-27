@@ -3,14 +3,18 @@
   "name": "Webcord",
   "version": "1.0.0",
   "description": "Add a draggable camera overlay to HTML pages and record the page activity together with the camera window.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "activeTab",
     "tabCapture",
-    "desktopCapture",
     "scripting",
     "downloads",
     "tabs",
-    "windows",
     "storage"
   ],
   "host_permissions": [
@@ -18,7 +22,13 @@
   ],
   "action": {
     "default_title": "Webcord",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "background": {
     "service_worker": "src/background.js"
@@ -29,6 +39,7 @@
         "<all_urls>"
       ],
       "js": [
+        "src/i18n.js",
         "src/content.js"
       ],
       "run_at": "document_idle"

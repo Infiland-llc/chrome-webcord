@@ -13,10 +13,8 @@ Chrome Webcord is a Manifest V3 extension that adds a draggable camera overlay t
 - Current-tab recording without Chrome's screen/window picker, using `chrome.tabCapture`
 - Optional fixed-region recording inside the current tab's visible viewport
 - Mixed audio from the captured tab and camera microphone
-- Separate floating control panel with start/stop controls that is not part of the captured tab
+- Compact toolbar popup for record, pause, cancel, camera, microphone, and region settings
 - Draggable semi-transparent teleprompter with opacity control, scrollable text, and copy support
-- Cross-tab workflow: keep recording the selected tab while switching to other tabs
-- Screen/window recording through Chrome's desktop capture picker
 - MP4 output when the installed Chrome build supports MP4 recording, with WebM fallback
 
 ## Install
@@ -30,21 +28,15 @@ Chrome Webcord is a Manifest V3 extension that adds a draggable camera overlay t
 ## Usage
 
 1. Open a normal website or an HTML file.
-2. Use the floating camera button to start camera preview.
-3. Drag the toolbar to move the overlay, or drag the lower-right corner to resize it.
-4. Open the settings button to change mask shape, corner radius, border width, or border color.
-5. Click the extension icon and choose **Open floating control panel**.
-6. Pick the target tab in the floating panel.
-7. Choose **Current tab** to record the selected tab without Chrome's screen/window picker.
-8. Choose **Screen/window** to use Chrome's desktop capture picker.
-9. Use the teleprompter in the floating panel while recording. It is separate from the captured tab.
-10. Stop recording from the floating panel or by double-clicking the camera preview.
+2. Click the extension icon to show the camera overlay and recording controls.
+3. Drag the camera preview to move the overlay, or drag the lower-right corner to resize it.
+4. Open the overlay settings button to change mask shape, border width, or border color.
+5. In the popup, choose **整页** or **区域** under settings, then start recording.
+6. Pause, resume, cancel, or stop from the popup. Stopping downloads the file; cancel discards it.
 
 Chrome does not allow extensions to inject scripts into browser-internal pages such as `chrome://extensions`, the Chrome Web Store, or extension gallery pages.
 
-Chrome also does not allow an extension to silently capture the whole desktop or an arbitrary OS-level window/region. This extension records the selected tab directly, and screen/window recording uses Chrome's required desktop capture picker.
-
-The floating control panel and teleprompter are not rendered into current-tab recordings because they live in a separate extension window. If you record an entire screen, any visible real window on that screen can be captured by the operating-system-level source.
+Chrome also does not allow an extension to silently capture the whole desktop or an arbitrary OS-level window/region. This extension records the current tab directly.
 
 ## Test
 
