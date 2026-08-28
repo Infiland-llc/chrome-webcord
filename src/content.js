@@ -25,16 +25,7 @@
     recordArea: "tab",
     recordMicrophone: false,
     cropRect: null,
-    cropAspect: "any",
-    prompter: {
-      visible: false,
-      x: 24,
-      y: 320,
-      width: 380,
-      height: 260,
-      opacity: 72,
-      text: "在这里输入提词内容。"
-    }
+    cropAspect: "any"
   };
 
   const ICONS = {
@@ -64,9 +55,6 @@
   let borderColorInput;
   let settingsPanel;
   let previewFrame;
-  let prompterHost;
-  let promptTextEl;
-  let prompterOpacityInput;
   let regionMaskHost;
   let regionMaskShadow;
   let regionDockTimer = 0;
@@ -112,11 +100,8 @@
     state.recordArea = DEFAULT_STATE.recordArea;
     state.cropRect = DEFAULT_STATE.cropRect;
     state.cropAspect = DEFAULT_STATE.cropAspect;
-    state.prompter = { ...DEFAULT_STATE.prompter, ...(stored.prompter || {}), visible: false };
     buildOverlay();
-    buildPrompter();
     applyState();
-    applyPrompterState();
     applyLocale();
     bindChromeMessages();
     bindLocaleStorage();
@@ -148,38 +133,14 @@
       if (shadow) {
         window.HCR_I18N.apply(shadow, locale);
       }
-      if (prompterHost?.shadowRoot) {
-        window.HCR_I18N.apply(prompterHost.shadowRoot, locale);
-      }
       if (regionMaskShadow) {
         window.HCR_I18N.apply(regionMaskShadow, locale);
       }
     }
-    applyDefaultPrompterText();
     refreshOverlayChrome();
     if (state.cropRect) {
       updateRegionDock(state.cropRect);
     }
-  }
-
-  function applyDefaultPrompterText() {
-    if (!window.HCR_I18N) {
-      return;
-    }
-    const defaults = new Set([
-      window.HCR_I18N.t("zh", "prompterPlaceholder"),
-      window.HCR_I18N.t("en", "prompterPlaceholder")
-    ]);
-    if (!defaults.has(state.prompter.text)) {
-      return;
-    }
-    const next = t("prompterPlaceholder");
-    if (state.prompter.text === next) {
-      return;
-    }
-    state.prompter.text = next;
-    applyPrompterState();
-    persistState();
   }
 
   function refreshOverlayChrome() {
@@ -361,143 +322,6 @@
 
     bindDrag(previewFrame);
     bindResize(shadow.querySelector(".resize-handle"));
-  }
-
-  function buildPrompter() {
-    prompterHost = document.createElement("html-camera-prompter");
-    prompterHost.setAttribute("data-role", "prompter");
-    const prompterShadow = prompterHost.attachShadow({ mode: "open" });
-
-    const stylesheet = document.createElement("link");
-    stylesheet.rel = "stylesheet";
-    stylesheet.href = chrome.runtime.getURL("src/content.css");
-
-    const panel = document.createElement("section");
-    panel.className = "prompter";
-    panel.innerHTML = `
-      <div class="prompter-handle" data-prompter-drag>
-        <strong data-i18n="prompterTitle">题词板</strong>
-        <span data-i18n="prompterDrag">拖动这里移动</span>
-      </div>
-      <label class="field">
-        <span data-i18n="opacity">透明度</span>
-        <input class="prompter-opacity" type="range" min="20" max="100" step="1" value="72">
-      </label>
-      <textarea class="prompter-text" spellcheck="false"></textarea>
-      <div class="button-row">
-        <button class="copy-prompt" type="button" data-i18n="copyText">复制文本</button>
-        <button class="clear-prompt" type="button" data-i18n="clear">清空</button>
-      </div>
-      <div class="prompter-resize" title="拖拽调整大小" data-i18n-title="prompterResize"></div>
-    `;
-
-    prompterShadow.append(stylesheet, panel);
-    prompterHost.hidden = true;
-    document.documentElement.appendChild(prompterHost);
-
-    promptTextEl = prompterShadow.querySelector(".prompter-text");
-    prompterOpacityInput = prompterShadow.querySelector(".prompter-opacity");
-
-    promptTextEl.addEventListener("input", () => {
-      state.prompter.text = promptTextEl.value;
-      persistState();
-    });
-    prompterOpacityInput.addEventListener("input", () => {
-      state.prompter.opacity = Number(prompterOpacityInput.value);
-      applyPrompterState();
-      persistState();
-    });
-    prompterShadow.querySelector(".copy-prompt").addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(promptTextEl.value);
-      } catch (_error) {
-        promptTextEl.select();
-        document.execCommand("copy");
-      }
-    });
-    prompterShadow.querySelector(".clear-prompt").addEventListener("click", () => {
-      promptTextEl.value = "";
-      state.prompter.text = "";
-      persistState();
-    });
-
-    bindPrompterDrag(prompterShadow.querySelector("[data-prompter-drag]"));
-    bindPrompterResize(prompterShadow.querySelector(".prompter-resize"));
-  }
-
-  function bindPrompterDrag(handle) {
-    let start = null;
-
-    handle.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button")) {
-        return;
-      }
-      start = {
-        pointerId: event.pointerId,
-        pointerX: event.clientX,
-        pointerY: event.clientY,
-        x: state.prompter.x,
-        y: state.prompter.y
-      };
-      handle.setPointerCapture(event.pointerId);
-    });
-
-    handle.addEventListener("pointermove", (event) => {
-      if (!start || event.pointerId !== start.pointerId) {
-        return;
-      }
-      state.prompter.x = clamp(start.x + event.clientX - start.pointerX, 0, Math.max(0, window.innerWidth - state.prompter.width));
-      state.prompter.y = clamp(start.y + event.clientY - start.pointerY, 0, Math.max(0, window.innerHeight - state.prompter.height));
-      applyPrompterState();
-    });
-
-    handle.addEventListener("pointerup", finish);
-    handle.addEventListener("pointercancel", finish);
-
-    function finish(event) {
-      if (!start || event.pointerId !== start.pointerId) {
-        return;
-      }
-      start = null;
-      persistState();
-    }
-  }
-
-  function bindPrompterResize(handle) {
-    let start = null;
-
-    handle.addEventListener("pointerdown", (event) => {
-      start = {
-        pointerId: event.pointerId,
-        pointerX: event.clientX,
-        pointerY: event.clientY,
-        width: state.prompter.width,
-        height: state.prompter.height
-      };
-      handle.setPointerCapture(event.pointerId);
-      event.preventDefault();
-    });
-
-    handle.addEventListener("pointermove", (event) => {
-      if (!start || event.pointerId !== start.pointerId) {
-        return;
-      }
-      state.prompter.width = clamp(start.width + event.clientX - start.pointerX, 280, window.innerWidth);
-      state.prompter.height = clamp(start.height + event.clientY - start.pointerY, 180, window.innerHeight);
-      constrainPrompterToViewport();
-      applyPrompterState();
-    });
-
-    handle.addEventListener("pointerup", finish);
-    handle.addEventListener("pointercancel", finish);
-
-    function finish(event) {
-      if (!start || event.pointerId !== start.pointerId) {
-        return;
-      }
-      start = null;
-      persistState();
-    }
   }
 
   function bindDrag(handle) {
@@ -2241,26 +2065,6 @@
     syncRegionMask();
   }
 
-  function applyPrompterState() {
-    if (!prompterHost) {
-      return;
-    }
-
-    constrainPrompterToViewport();
-    prompterHost.hidden = !state.prompter.visible;
-    prompterHost.style.left = `${Math.round(state.prompter.x)}px`;
-    prompterHost.style.top = `${Math.round(state.prompter.y)}px`;
-    prompterHost.style.width = `${Math.round(state.prompter.width)}px`;
-    prompterHost.style.height = `${Math.round(state.prompter.height)}px`;
-    prompterHost.style.setProperty("--hcr-prompter-opacity", String(state.prompter.opacity / 100));
-    if (prompterOpacityInput) {
-      prompterOpacityInput.value = String(state.prompter.opacity);
-    }
-    if (promptTextEl && promptTextEl.value !== state.prompter.text) {
-      promptTextEl.value = state.prompter.text;
-    }
-  }
-
   function constrainToViewport() {
     const minSize = 168;
     const maxSize = Math.max(minSize, Math.min(window.innerWidth, window.innerHeight));
@@ -2269,13 +2073,6 @@
     state.height = size;
     state.x = clamp(state.x, 0, Math.max(0, window.innerWidth - size));
     state.y = clamp(state.y, 0, Math.max(0, window.innerHeight - size));
-  }
-
-  function constrainPrompterToViewport() {
-    state.prompter.width = clamp(state.prompter.width, 280, Math.max(280, window.innerWidth));
-    state.prompter.height = clamp(state.prompter.height, 180, Math.max(180, window.innerHeight));
-    state.prompter.x = clamp(state.prompter.x, 0, Math.max(0, window.innerWidth - state.prompter.width));
-    state.prompter.y = clamp(state.prompter.y, 0, Math.max(0, window.innerHeight - state.prompter.height));
   }
 
   function setStatus(message) {
@@ -2384,21 +2181,11 @@
       }
 
       if (message?.type === "HCR_RESET_OVERLAY") {
-        const prompter = { ...state.prompter };
-        state = { ...DEFAULT_STATE, prompter };
+        state = { ...DEFAULT_STATE };
         applyState();
-        applyPrompterState();
         persistState();
         syncCameraPreview();
         sendResponse({ ok: true });
-        return true;
-      }
-
-      if (message?.type === "HCR_TOGGLE_PROMPTER") {
-        state.prompter.visible = !state.prompter.visible;
-        applyPrompterState();
-        persistState();
-        sendResponse({ ok: true, visible: state.prompter.visible });
         return true;
       }
 
@@ -2448,10 +2235,8 @@
 
   window.addEventListener("resize", () => {
     constrainToViewport();
-    constrainPrompterToViewport();
     constrainCropRect();
     applyState();
-    applyPrompterState();
     persistState();
   });
 

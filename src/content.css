@@ -15,19 +15,6 @@
   display: none;
 }
 
-:host([data-role="prompter"]) {
-  all: initial;
-  display: block;
-  position: fixed;
-  z-index: 2147483646;
-  color-scheme: light dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-:host([data-role="prompter"][hidden]) {
-  display: none;
-}
-
 :host([data-role="region-mask"]) {
   all: initial;
   display: block;
@@ -394,109 +381,6 @@ input[type="range"] {
     border-color: rgba(148, 163, 184, 0.25);
     background: #111827;
   }
-}
-
-.prompter {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 10px;
-  width: 100%;
-  height: 100%;
-  min-width: 280px;
-  min-height: 180px;
-  padding: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 10px;
-  background: rgba(17, 24, 39, var(--hcr-prompter-opacity, 0.72));
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
-  color: #f8fafc;
-}
-
-.prompter .field {
-  margin: 0;
-  color: #dbeafe;
-}
-
-.prompter-handle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 30px;
-  cursor: grab;
-  user-select: none;
-}
-
-.prompter-handle:active {
-  cursor: grabbing;
-}
-
-.prompter-handle span {
-  color: rgba(226, 232, 240, 0.84);
-  font-size: 11px;
-}
-
-.prompter textarea {
-  width: 100%;
-  height: 100%;
-  min-height: 80px;
-  resize: none;
-  overflow: auto;
-  border: 1px solid rgba(226, 232, 240, 0.22);
-  border-radius: 6px;
-  color: #f8fafc;
-  background: rgba(15, 23, 42, 0.58);
-  padding: 12px;
-  font: 400 18px/1.55 Inter, ui-sans-serif, system-ui, sans-serif;
-}
-
-.prompter .button-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.prompter button {
-  min-height: 34px;
-  border: 1px solid rgba(226, 232, 240, 0.28);
-  border-radius: 7px;
-  color: #f8fafc;
-  background: rgba(15, 23, 42, 0.7);
-  font: 750 12px/1 Inter, ui-sans-serif, system-ui, sans-serif;
-  cursor: pointer;
-}
-
-.prompter button:hover {
-  background: rgba(30, 41, 59, 0.92);
-}
-
-.prompter-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 18px;
-  height: 18px;
-  cursor: nwse-resize;
-}
-
-.prompter-resize::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid rgba(255, 255, 255, 0.84);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.84);
-}
-
-.prompter textarea:focus,
-.prompter button:focus-visible,
-.prompter input:focus-visible {
-  outline: 2px solid #60a5fa;
-  outline-offset: 2px;
 }
 
 .region-mask {

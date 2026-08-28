@@ -51,14 +51,7 @@
       cannotCreateRegionFrame: "无法创建区域录制画面",
       videoDownloaded: "视频已下载。",
       recordingCancelled: "录制已取消。",
-      recordingElsewhere: "其他页签正在录制",
-      prompterTitle: "题词板",
-      prompterDrag: "拖动这里移动",
-      opacity: "透明度",
-      copyText: "复制文本",
-      clear: "清空",
-      prompterPlaceholder: "在这里输入提词内容。",
-      prompterResize: "拖拽调整大小"
+      recordingElsewhere: "其他页签正在录制"
     },
     en: {
       record: "Record",
@@ -110,14 +103,7 @@
       cannotCreateRegionFrame: "Couldn't create the region recording frame",
       videoDownloaded: "Video downloaded.",
       recordingCancelled: "Recording cancelled.",
-      recordingElsewhere: "Another tab is recording",
-      prompterTitle: "Teleprompter",
-      prompterDrag: "Drag here to move",
-      opacity: "Opacity",
-      copyText: "Copy text",
-      clear: "Clear",
-      prompterPlaceholder: "Type your script here.",
-      prompterResize: "Drag to resize"
+      recordingElsewhere: "Another tab is recording"
     }
   };
 
